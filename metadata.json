@@ -1,0 +1,8 @@
+{
+  "name": "Remix Cricket Score Master",
+  "description": "A ball-by-ball cricket scoring and bet slip studio application with real-time updates and AI extraction.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

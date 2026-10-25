@@ -1,12 +1,13 @@
 import React from 'react';
 
 export interface BallNumberWordLogoProps {
-  value: number | string; // 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or 'W', 'WD', 'NB', etc.
-  label?: string; // Optional custom text e.g. '1wd', 'W+2', 'BOWLED', 'CAUGHT', 'RUN OUT'
+  value: number | string; // '.', 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or 'W', 'C', 'B', 'LBW', 'R', 'WD', 'NB', etc.
+  label?: string; // Optional custom text e.g. '.', 'C', 'B', 'LBW', 'R+1', '1lb', '1b', 'NB+1'
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | 'hero';
   className?: string;
   isWicket?: boolean;
   isExtra?: boolean;
+  isFire?: boolean;
   colorScheme?: 'auto' | 'gold' | 'emerald' | 'indigo' | 'purple' | 'red' | 'amber' | 'dark' | 'light';
   animated?: boolean;
   isCircle?: boolean;
@@ -14,8 +15,9 @@ export interface BallNumberWordLogoProps {
 }
 
 /**
- * Renders stylized vector word/digit logos for numbers (0-9, One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, etc.)
- * and wicket types (WICKET, BOWLED, CAUGHT, RUN OUT, LBW, STUMPED, HIT WICKET, etc.)
+ * Renders stylized vector word/digit logos for numbers (., 1, 2, 3, 4, 5, 6, etc.),
+ * wicket notations (C, B, LBW, R, R+1, R+2... in Red), extras (1lb, 2lb..., 1b, 2b...),
+ * and No Ball / Free Hit with Fire (NB, NB+1..., Free Hit).
  */
 export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
   value,
@@ -24,6 +26,7 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
   className = '',
   isWicket = false,
   isExtra = false,
+  isFire = false,
   colorScheme = 'auto',
   animated = false,
   isCircle = false,
@@ -31,11 +34,32 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
 }) => {
   // Normalize key string
   const valKey = String(value ?? '').trim();
-  const numVal = typeof value === 'number' ? value : parseInt(valKey, 10);
+  const rawLabel = label !== undefined && label !== null ? String(label).trim() : '';
+  const effectiveToken = (rawLabel || valKey).trim();
+  const numVal = typeof value === 'number' ? value : (/^\d+$/.test(valKey) ? parseInt(valKey, 10) : NaN);
 
-  // Check if it's a wicket or extra string
-  if (valKey.toLowerCase().includes('w') && !valKey.toLowerCase().includes('wd')) {
-    if (isNaN(numVal) || numVal === 0) isWicket = true;
+  // Detect wicket notation: C, B, LBW, R, R+1, R+2..., W, W+1..., Caught, Bowled, Run Out, etc.
+  // Note: 1b, 2b, 3b (byes) start with a digit so they are NOT matched as 'B' (Bowled).
+  if (
+    /^(?:W|C|B|LBW|R|ST|HW)(?:\+\d+)?$/i.test(effectiveToken) ||
+    /^(?:caught|bowled|lbw|leg\s*bye\s*wicket|run\s*out|stumped|hit\s*wicket|wicket|wickets|out)(?:\s*\+\s*\d+)?$/i.test(effectiveToken) ||
+    (valKey.toLowerCase().includes('w') && !valKey.toLowerCase().includes('wd') && (isNaN(numVal) || numVal === 0))
+  ) {
+    isWicket = true;
+  }
+
+  // Detect No Ball (NB, NB+1...) or Free Hit -> Fire
+  if (
+    /^nb(?:\+\d+)?$/i.test(effectiveToken) ||
+    /^(?:no\s*ball|free\s*hit|fh)(?:\s*\+\s*\d+)?$/i.test(effectiveToken) ||
+    effectiveToken.includes('🔥')
+  ) {
+    isFire = true;
+  }
+
+  // Detect Leg Bye (1lb, 2lb...) or Bye (1b, 2b...) or Wide (WD, WD+1...) as extra
+  if (/^\d+(?:lb|b)$/i.test(effectiveToken) || /^wd(?:\+\d+)?$/i.test(effectiveToken)) {
+    isExtra = true;
   }
 
   // Derive color scheme if auto
@@ -44,8 +68,11 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
 
   if (colorScheme === 'auto') {
     if (isWicket) {
-      bgClass = 'bg-gradient-to-br from-red-600 to-red-800 text-white shadow-red-500/30';
+      bgClass = 'bg-gradient-to-br from-red-600 to-red-800 text-white shadow-red-500/40';
       borderClass = 'border-red-500';
+    } else if (isFire) {
+      bgClass = 'bg-gradient-to-br from-orange-500 via-red-600 to-amber-600 text-white shadow-orange-500/40';
+      borderClass = 'border-orange-400';
     } else if (numVal >= 6) {
       bgClass = 'bg-gradient-to-br from-purple-600 to-indigo-800 text-white shadow-purple-500/30';
       borderClass = 'border-purple-400';
@@ -55,7 +82,7 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
     } else if (isExtra) {
       bgClass = 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-500/30';
       borderClass = 'border-amber-400';
-    } else if (numVal === 0 || valKey === '0' || valKey.toLowerCase() === 'dot') {
+    } else if (numVal === 0 || valKey === '0' || valKey === '.' || valKey.toLowerCase() === 'dot' || rawLabel === '.') {
       bgClass = 'bg-gradient-to-br from-slate-800 to-slate-950 text-slate-200 border-slate-700';
       borderClass = 'border-slate-600';
     } else {
@@ -96,82 +123,69 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
   // Determine effective display string/word
   let word = '';
   if (displayMode === 'digit') {
-    if (label !== undefined && label !== null && label !== '') {
-      word = label;
+    if (rawLabel !== '') {
+      word = rawLabel;
+    } else if (valKey === '0' || numVal === 0 || valKey === '.' || valKey.toLowerCase() === 'dot') {
+      word = '.';
     } else if (!isNaN(numVal)) {
       word = numVal.toString();
     } else {
       word = valKey;
     }
   } else if (displayMode === 'word') {
-    if (label) {
-      word = label.toUpperCase();
+    if (rawLabel) {
+      word = rawLabel;
     } else if (isWicket) {
-      word = 'WICKET';
-    } else if (valKey === '0' || numVal === 0 || valKey.toLowerCase() === 'dot') {
-      word = 'DOT';
+      word = valKey ? valKey.toUpperCase() : 'W';
+    } else if (valKey === '0' || numVal === 0 || valKey === '.' || valKey.toLowerCase() === 'dot') {
+      word = '.';
     } else if (numVal === 1 || valKey === '1') {
-      word = 'ONE';
+      word = '1';
     } else if (numVal === 2 || valKey === '2') {
-      word = 'TWO';
+      word = '2';
     } else if (numVal === 3 || valKey === '3') {
-      word = 'THREE';
+      word = '3';
     } else if (numVal === 4 || valKey === '4') {
-      word = 'FOUR';
+      word = '4';
     } else if (numVal === 5 || valKey === '5') {
-      word = 'FIVE';
+      word = '5';
     } else if (numVal === 6 || valKey === '6') {
-      word = 'SIX';
+      word = '6';
     } else if (numVal === 7 || valKey === '7') {
-      word = 'SEVEN';
+      word = '7';
     } else if (numVal === 8 || valKey === '8') {
-      word = 'EIGHT';
+      word = '8';
     } else if (numVal === 9 || valKey === '9') {
-      word = 'NINE';
+      word = '9';
     } else if (numVal === 10 || valKey === '10') {
-      word = 'TEN';
+      word = '10';
     } else {
-      word = valKey.toUpperCase();
+      word = valKey;
     }
   } else {
-    // auto mode
-    if (label) {
-      word = label;
+    // auto mode: use concise cricket notation (., 1, 2, 3, 4, 5, 6, C, B, LBW, R+1, 1lb, 1b, NB, NB+1...)
+    if (rawLabel !== '') {
+      word = rawLabel;
+    } else if (valKey === '0' || numVal === 0 || valKey === '.' || valKey.toLowerCase() === 'dot') {
+      word = '.';
+    } else if (!isNaN(numVal)) {
+      word = numVal.toString();
     } else if (isWicket) {
-      word = 'WICKET';
-    } else if (valKey === '0' || numVal === 0 || valKey.toLowerCase() === 'dot') {
-      word = 'DOT';
-    } else if (numVal === 1 || valKey === '1') {
-      word = 'ONE';
-    } else if (numVal === 2 || valKey === '2') {
-      word = 'TWO';
-    } else if (numVal === 3 || valKey === '3') {
-      word = 'THREE';
-    } else if (numVal === 4 || valKey === '4') {
-      word = 'FOUR';
-    } else if (numVal === 5 || valKey === '5') {
-      word = 'FIVE';
-    } else if (numVal === 6 || valKey === '6') {
-      word = 'SIX';
-    } else if (numVal === 7 || valKey === '7') {
-      word = 'SEVEN';
-    } else if (numVal === 8 || valKey === '8') {
-      word = 'EIGHT';
-    } else if (numVal === 9 || valKey === '9') {
-      word = 'NINE';
-    } else if (numVal === 10 || valKey === '10') {
-      word = 'TEN';
+      word = valKey || 'W';
     } else {
-      word = valKey.toUpperCase();
+      word = valKey;
     }
   }
+
+  // Add fire emoji if isFire and not already containing fire emoji
+  const displayWord = isFire && !word.includes('🔥') ? `${word}🔥` : word;
 
   const baseSvgSize = svgSizeMap[size] || svgSizeMap.md;
   let computedWidth = baseSvgSize.width;
   const upperWord = word.trim().toUpperCase();
 
-  if (upperWord.length > 5 && !isCircle) {
-    computedWidth = Math.max(baseSvgSize.width, 70 + upperWord.length * 10);
+  if (displayWord.length > 5 && !isCircle) {
+    computedWidth = Math.max(baseSvgSize.width, 70 + displayWord.length * 10);
   }
 
   const textColor = colorScheme === 'gold' ? '#0f172a' : '#ffffff';
@@ -179,13 +193,10 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
   // Render vector SVG for word/digit logo
   const renderWordLogoSVG = () => {
     if (isCircle) {
-      if (word === 'DOT' || word === '0') {
+      if (word === 'DOT' || word === '0' || word === '.') {
         return (
           <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
-            <circle cx="26" cy="50" r="7.5" fill="#f59e0b" />
-            <text x="62" y="58" textAnchor="middle" fill="#ffffff" fontFamily="system-ui, -apple-system, sans-serif" fontWeight="900" fontSize="25" letterSpacing="1">
-              DOT
-            </text>
+            <circle cx="50" cy="50" r="12" fill="#f59e0b" />
           </svg>
         );
       }
@@ -193,36 +204,48 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
         <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
           <text
             x="50"
-            y="58"
+            y="60"
             textAnchor="middle"
             fill="#ffffff"
             fontFamily="system-ui, -apple-system, sans-serif"
             fontWeight="900"
-            fontSize={word.length > 5 ? '18' : word.length > 3 ? '24' : '30'}
-            letterSpacing="1"
+            fontSize={displayWord.length > 5 ? '18' : displayWord.length > 3 ? '24' : '36'}
+            letterSpacing="0.5"
           >
-            {word}
+            {displayWord}
           </text>
         </svg>
       );
     }
 
-    // Digit mode rendering (e.g. "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "1WD", "1NB", "1BYE", etc.)
-    if (displayMode === 'digit' || (/^[0-9]+(\s*(WD|NB|BYE|LB|B|W))?$/i.test(word) && !['ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','DOT','WICKET','BOWLED','CAUGHT','RUN OUT','LBW','STUMPED'].includes(upperWord))) {
-      if (/^[0-9]+$/.test(word)) {
+    if (word === '.' || upperWord === 'DOT' || word === '0') {
+      return (
+        <svg viewBox="0 0 100 50" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
+          <circle cx="50" cy="25" r="9" fill="#f59e0b" />
+        </svg>
+      );
+    }
+
+    // Concise notation rendering (e.g. "1", "2", "3", "4", "5", "6", "C", "B", "LBW", "R", "R+1", "1lb", "2lb", "1b", "2b", "NB🔥", "NB+1🔥", "WD", etc.)
+    if (
+      displayMode === 'digit' ||
+      isFire ||
+      /^(?:[0-9]+|[0-9]+(?:lb|b)|(?:C|B|LBW|R|W|ST|HW)(?:\+\d+)?|WD(?:\+\d+)?|NB(?:\+\d+)?)$/i.test(word)
+    ) {
+      if (/^[0-9]+$/.test(word) || /^(?:C|B|R|W)$/i.test(word)) {
         return (
           <svg viewBox="0 0 100 50" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
             <text 
               x="50" 
-              y="38" 
+              y="37" 
               textAnchor="middle" 
               fill={textColor} 
               fontFamily="system-ui, -apple-system, sans-serif" 
               fontWeight="900" 
-              fontSize={word.length === 1 ? '38' : '32'} 
-              letterSpacing="-1"
+              fontSize={displayWord.length === 1 ? '36' : '30'} 
+              letterSpacing="0"
             >
-              {word}
+              {displayWord}
             </text>
           </svg>
         );
@@ -231,15 +254,15 @@ export const BallNumberWordLogo: React.FC<BallNumberWordLogoProps> = ({
         <svg viewBox="0 0 130 50" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
           <text 
             x="65" 
-            y="36" 
+            y="35" 
             textAnchor="middle" 
             fill={textColor} 
             fontFamily="system-ui, -apple-system, sans-serif" 
             fontWeight="900" 
-            fontSize={word.length > 4 ? '22' : '26'} 
+            fontSize={displayWord.length > 5 ? '20' : displayWord.length > 3 ? '24' : '28'} 
             letterSpacing="0"
           >
-            {word}
+            {displayWord}
           </text>
         </svg>
       );

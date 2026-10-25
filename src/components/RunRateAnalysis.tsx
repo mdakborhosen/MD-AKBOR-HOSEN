@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { getShortTeamName, formatShortMatchTitle } from '../types';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -28,7 +29,8 @@ import {
   Info,
   Layers,
   BarChart2,
-  PieChart
+  PieChart,
+  Trash2
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,6 +56,7 @@ export interface RunRateAnalysisProps {
   };
   matches?: any[];
   onSelectMatch?: (id: string) => void;
+  onDeleteMatch?: (id: string) => void;
   onUpdateTarget?: (target: number) => void;
   lang?: 'en' | 'bn';
 }
@@ -62,6 +65,7 @@ export const RunRateAnalysis: React.FC<RunRateAnalysisProps> = ({
   match,
   matches = [],
   onSelectMatch,
+  onDeleteMatch,
   onUpdateTarget,
   lang = 'bn'
 }) => {
@@ -231,29 +235,45 @@ export const RunRateAnalysis: React.FC<RunRateAnalysisProps> = ({
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {match.name || `${match.team1} vs ${match.team2}`} • {match.battingTeam || match.team1} {match.score}/{match.wickets} ({totalCompletedOvers}.{ballsInCurrentOver} ov)
+              {formatShortMatchTitle(match.name, match.team1, match.team2)} • {getShortTeamName(match.battingTeam || match.team1)} {match.score}/{match.wickets} ({totalCompletedOvers}.{ballsInCurrentOver} ov)
             </p>
           </div>
         </div>
 
         {/* Matches Quick Selector Dropdown/Pills */}
-        {matches.length > 1 && onSelectMatch && (
+        {matches.length > 0 && onSelectMatch && (
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar w-full sm:w-auto">
             {matches.map((m) => {
               const isSelected = m.id === match.id;
               return (
-                <button
+                <div
                   key={m.id}
                   onClick={() => onSelectMatch(m.id)}
                   className={cn(
-                    "px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer border",
+                    "px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer border flex items-center gap-1.5",
                     isSelected
                       ? "bg-indigo-600 text-white border-indigo-500 shadow-xs"
                       : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200"
                   )}
                 >
-                  <span className="truncate max-w-[90px] inline-block">{m.name || `${m.team1} v ${m.team2}`}</span>
-                </button>
+                  <span className="truncate max-w-[90px] inline-block">{formatShortMatchTitle(m.name, m.team1, m.team2)}</span>
+                  {onDeleteMatch && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteMatch(m.id);
+                      }}
+                      className={cn(
+                        "p-0.5 rounded hover:bg-rose-500/20 transition-colors cursor-pointer",
+                        isSelected ? "text-rose-200 hover:text-white" : "text-rose-500 hover:text-rose-600"
+                      )}
+                      title={lang === 'bn' ? 'ম্যাচটি ডিলিট করুন' : 'Delete match'}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -605,7 +625,7 @@ export const RunRateAnalysis: React.FC<RunRateAnalysisProps> = ({
                 <Line
                   type="monotone"
                   dataKey="cumulativeRuns"
-                  name={match.battingTeam || match.team1}
+                  name={getShortTeamName(match.battingTeam || match.team1)}
                   stroke="#6366f1"
                   strokeWidth={3}
                   dot={{ r: 3, fill: '#6366f1', strokeWidth: 1.5, stroke: '#fff' }}

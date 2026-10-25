@@ -13,12 +13,14 @@ export default defineConfig(({mode}) => {
       VitePWA({
         registerType: 'autoUpdate',
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
         workbox: {
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
+          navigateFallbackDenylist: [/^\/api\//, /__cookie_check/],
+          maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         },
         manifest: {
           name: 'Cricket Score Master',

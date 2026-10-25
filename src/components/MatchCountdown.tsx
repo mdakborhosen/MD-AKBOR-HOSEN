@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Clock, Play, Calendar, Zap, AlertCircle, Edit3, X, Check, Timer, Target, CircleDot, Flag, Plus } from 'lucide-react';
+import { Clock, Play, Calendar, Zap, AlertCircle, Edit3, X, Check, Timer, Target, CircleDot, Flag, Plus, ArrowLeft, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -9,21 +9,103 @@ export const toBengaliDigits = (val: number | string): string => {
   return String(val).replace(/[0-9]/g, (d) => bnDigits[Number(d)]);
 };
 
-// Robust parser for match start time strings or ISO timestamps
-export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: string): number | null {
-  if (isoTime) {
-    const t = new Date(isoTime).getTime();
-    if (!isNaN(t)) return t;
+const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function formatMatchDateTimeDisplay(
+  startTime?: string,
+  isoTime?: string,
+  lang: 'bn' | 'en' = 'bn',
+  matchDate?: string
+): {
+  dateStr: string;
+  timeStr: string;
+  fullDateTimeStr: string;
+  targetTimestamp: number | null;
+  minutesRemaining: number | null;
+} {
+  const ts = parseMatchStartTimeToTimestamp(startTime, isoTime);
+  if (ts && !isNaN(ts)) {
+    const d = new Date(ts);
+    const dayNum = String(d.getDate()).padStart(2, '0');
+    const monthIdx = d.getMonth();
+    const yearNum = d.getFullYear();
+
+    const hours24 = d.getHours();
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = String(hours24 % 12 || 12).padStart(2, '0');
+
+    const dateStr = lang === 'bn'
+      ? `${toBengaliDigits(dayNum)} ${BN_MONTHS[monthIdx]} ${toBengaliDigits(yearNum)}`
+      : `${dayNum} ${EN_MONTHS[monthIdx]} ${yearNum}`;
+
+    const timeStr = lang === 'bn'
+      ? `${toBengaliDigits(hours12)}:${toBengaliDigits(mins)} ${ampm}`
+      : `${hours12}:${mins} ${ampm}`;
+
+    const minutesRemaining = Math.ceil((ts - Date.now()) / 60000);
+
+    return {
+      dateStr,
+      timeStr,
+      fullDateTimeStr: `${dateStr} • ${timeStr}`,
+      targetTimestamp: ts,
+      minutesRemaining
+    };
   }
-  if (!startTime || typeof startTime !== 'string') return null;
+
+  // Fallback when no parseable timestamp is set yet: show current/match date and startTime text
+  const rawStartClean = (startTime || '').trim();
+  const parsedDateOnly = rawStartClean ? new Date(rawStartClean.replace(/•/g, ' ')) : (matchDate ? new Date(matchDate) : new Date());
+  const validD = !isNaN(parsedDateOnly.getTime()) && parsedDateOnly.getFullYear() > 2020
+    ? parsedDateOnly
+    : (matchDate && !isNaN(new Date(matchDate).getTime()) ? new Date(matchDate) : new Date());
+  const dayNum = String(validD.getDate()).padStart(2, '0');
+  const monthIdx = validD.getMonth();
+  const yearNum = validD.getFullYear();
+  const dateStr = lang === 'bn'
+    ? `${toBengaliDigits(dayNum)} ${BN_MONTHS[monthIdx]} ${toBengaliDigits(yearNum)}`
+    : `${dayNum} ${EN_MONTHS[monthIdx]} ${yearNum}`;
+  const hasExplicitClockInStart = /\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:[AaPp][Mm]|টা)\b/i.test(rawStartClean);
+  const timeStr = hasExplicitClockInStart
+    ? rawStartClean
+    : (lang === 'bn' ? 'সময় সেট করুন' : 'Set Time');
+
+  return {
+    dateStr,
+    timeStr,
+    fullDateTimeStr: `${dateStr} • ${timeStr}`,
+    targetTimestamp: null,
+    minutesRemaining: null
+  };
+}
+
+// Robust parser for match start time strings or ISO timestamps
+export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: string, matchDate?: string): number | null {
+  if (isoTime) {
+    const isoRaw = String(isoTime).trim();
+    // Only accept isoTime directly if it includes a time component (T... or HH:mm)
+    if (/T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(isoRaw)) {
+      const t = new Date(isoRaw).getTime();
+      if (!isNaN(t)) return t;
+    }
+  }
+  if (!startTime || typeof startTime !== 'string') {
+    if (matchDate && /T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(String(matchDate))) {
+      const md = new Date(matchDate).getTime();
+      if (!isNaN(md)) return md;
+    }
+    return null;
+  }
 
   const raw = startTime.trim();
-  if (!raw) return null;
-
-  // Direct Date parse (e.g. standard ISO or Date strings)
-  const directDate = new Date(raw);
-  if (!isNaN(directDate.getTime()) && directDate.getFullYear() > 2020) {
-    return directDate.getTime();
+  if (!raw) {
+    if (matchDate && /T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(String(matchDate))) {
+      const md = new Date(matchDate).getTime();
+      if (!isNaN(md)) return md;
+    }
+    return null;
   }
 
   // Convert Bengali numerals to ASCII digits
@@ -32,9 +114,41 @@ export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: str
     '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
   };
   const normalized = raw.replace(/[০-৯]/g, (d) => bnToEnMap[d] || d);
+  const hasExplicitTimeToken = /\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:[AaPp][Mm]|টা)\b|T\d{2}:\d{2}/i.test(normalized);
+  const isDayFirstNumericDate = /^\s*\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b/.test(normalized);
 
-  // 1. Relative: e.g. "30m", "45 mins", "in 2 hours", "বাকি ২ ঘণ্টা ১৫ মিনিট", "১ ঘণ্টা ৩০ মিনিট"
-  const relMatch = normalized.match(/(?:in\s+|বাকি\s*)?(?:(\d+)\s*(?:hours?|hrs?|h|ঘণ্টা))?\s*(?:(\d+)\s*(?:minutes?|mins?|m|মি\.?|মিনিট))?(?:\s*বাকি)?/i);
+  // Direct Date parse ONLY when the string contains a time of day AND is not a day-first DD.MM / DD/MM / DD-MM string
+  if (hasExplicitTimeToken && !isDayFirstNumericDate) {
+    const directDate = new Date(raw.replace(/•/g, ' '));
+    if (!isNaN(directDate.getTime()) && directDate.getFullYear() > 2020) {
+      return directDate.getTime();
+    }
+  }
+
+  // Try direct Date parse after Bengali digit normalization & Bengali month replacement
+  const bnMonthNormalized = normalized
+    .replace(/জানু(?:য়ারি|য়ারি)?/g, 'Jan')
+    .replace(/ফেব্রু(?:য়ারি|য়ারি)?/g, 'Feb')
+    .replace(/মার্চ/g, 'Mar')
+    .replace(/এপ্রিল/g, 'Apr')
+    .replace(/মে/g, 'May')
+    .replace(/জুন/g, 'Jun')
+    .replace(/জুলাই/g, 'Jul')
+    .replace(/আগস্ট/g, 'Aug')
+    .replace(/সেপ্টে(?:ম্বর)?/g, 'Sep')
+    .replace(/অক্টো(?:বর)?/g, 'Oct')
+    .replace(/নভে(?:ম্বর)?/g, 'Nov')
+    .replace(/ডিসে(?:ম্বর)?/g, 'Dec')
+    .replace(/•/g, ' ');
+  if (hasExplicitTimeToken && !isDayFirstNumericDate) {
+    const normDirect = new Date(bnMonthNormalized);
+    if (!isNaN(normDirect.getTime()) && normDirect.getFullYear() > 2020) {
+      return normDirect.getTime();
+    }
+  }
+
+  // 1. Relative: e.g. "starts in 30m", "in 2 hours", "বাকি ২ ঘণ্টা ১৫ মিনিট"
+  const relMatch = normalized.match(/(?:\b(?:starts?\s+in|in)\s+|বাকি\s+)(?:(\d+)\s*(?:hours?|hrs?|h|ঘণ্টা))?\s*(?:(\d+)\s*(?:minutes?|mins?|m|মি\.?|মিনিট))?/i);
   if (relMatch && (relMatch[1] || relMatch[2])) {
     const hrs = parseInt(relMatch[1] || '0', 10);
     const mins = parseInt(relMatch[2] || '0', 10);
@@ -43,13 +157,34 @@ export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: str
     }
   }
 
-  // Check specific date in string (e.g. "2026-09-24" or "24-09-2026" or "24/09/2026")
+  // Check specific date in string (e.g. "2026-09-24", "24-09-2026", "04 Oct 2026", "Oct 04, 2026", "04 Oct", "(Oct 5)", or "21.04 15:30")
   const dateMatch = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) || normalized.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  const dotDateMatch = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?(?:\s*[,•]?\s*)\d{1,2}:\d{2}\b/);
+  const monthTextMatch =
+    bnMonthNormalized.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:[\s,]+\s*(\d{4}))?\b/i) ||
+    bnMonthNormalized.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:[\s,]+\s*(\d{4}))?\b/i);
   let specificYear: number | undefined;
   let specificMonth: number | undefined;
   let specificDay: number | undefined;
 
-  if (dateMatch) {
+  if (monthTextMatch) {
+    const firstIsDay = /^\d+$/.test(monthTextMatch[1]);
+    const dayStr = firstIsDay ? monthTextMatch[1] : monthTextMatch[2];
+    const monStr = firstIsDay ? monthTextMatch[2] : monthTextMatch[1];
+    specificDay = parseInt(dayStr, 10);
+    const mIdx = EN_MONTHS.findIndex(m => m.toLowerCase() === monStr.slice(0, 3).toLowerCase());
+    if (mIdx !== -1) specificMonth = mIdx;
+    if (monthTextMatch[3]) {
+      specificYear = parseInt(monthTextMatch[3], 10);
+    }
+  } else if (dotDateMatch) {
+    specificDay = parseInt(dotDateMatch[1], 10);
+    specificMonth = parseInt(dotDateMatch[2], 10) - 1;
+    if (dotDateMatch[3]) {
+      const y = parseInt(dotDateMatch[3], 10);
+      specificYear = y < 100 ? 2000 + y : y;
+    }
+  } else if (dateMatch) {
     if (dateMatch[1].length === 4) {
       specificYear = parseInt(dateMatch[1], 10);
       specificMonth = parseInt(dateMatch[2], 10) - 1;
@@ -59,42 +194,59 @@ export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: str
       specificMonth = parseInt(dateMatch[2], 10) - 1;
       specificYear = parseInt(dateMatch[3], 10);
     }
+  } else if (matchDate) {
+    const md = new Date(matchDate);
+    if (!isNaN(md.getTime())) {
+      specificYear = md.getFullYear();
+      specificMonth = md.getMonth();
+      specificDay = md.getDate();
+    }
   }
 
-  // 2. Time: e.g. "07:30 PM", "19:30", "7:30pm", "সন্ধ্যা ৭:৩০", "রাত ৮টা", "সন্ধ্যা ৭টা", "বিকাল ৪:১৫"
-  const timeMatch = normalized.match(/(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(?:টা)?\s*([AaPp][Mm])?/);
+  // 2. Time: requires a colon (HH:mm), 'টা', or AM/PM so plain score numbers (like "145/3" or "2 - 1") are never misparsed as hours
+  const timeMatch = normalized.match(/\b(\d{1,2})(?::(\d{2})(?::(\d{2}))?\s*(?:টা)?\s*([AaPp][Mm])?|\s*টা\s*([AaPp][Mm])?|\s+([AaPp][Mm]))\b/);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1], 10);
     const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
     const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
-    const ampm = timeMatch[4]?.toUpperCase();
+    const ampm = (timeMatch[4] || timeMatch[5] || timeMatch[6])?.toUpperCase();
 
-    const isEvening = /সন্ধ্যা|রাত|afternoon|evening|night|pm|বিকাল|দুপুর/i.test(raw);
-    const isMorning = /সকাল|morning|am|ভোর/i.test(raw);
+    if (hours <= 24 && minutes < 60 && seconds < 60) {
+      const isEvening = /সন্ধ্যা|রাত|afternoon|evening|night|pm|বিকাল|দুপুর/i.test(raw);
+      const isMorning = /সকাল|morning|am|ভোর/i.test(raw);
 
-    if (ampm === 'PM' && hours < 12) hours += 12;
-    if (ampm === 'AM' && hours === 12) hours = 0;
-    if (!ampm) {
-      if (isEvening && hours < 12) hours += 12;
-      if (isMorning && hours === 12) hours = 0;
-    }
-
-    const now = new Date();
-    const candidateYear = specificYear ?? now.getFullYear();
-    const candidateMonth = specificMonth ?? now.getMonth();
-    const candidateDay = specificDay ?? now.getDate();
-    const candidate = new Date(candidateYear, candidateMonth, candidateDay, hours, minutes, seconds);
-
-    if (!specificYear) {
-      if (/tomorrow|কাল|আগামীকাল/i.test(raw)) {
-        candidate.setDate(candidate.getDate() + 1);
-      } else if (candidate.getTime() < now.getTime() - 3 * 3600 * 1000) {
-        // If time passed by more than 3 hours today, treat as tomorrow
-        candidate.setDate(candidate.getDate() + 1);
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+      if (!ampm) {
+        if (isEvening && hours < 12) hours += 12;
+        if (isMorning && hours === 12) hours = 0;
       }
-    }
 
-    return candidate.getTime();
+      const now = new Date();
+      const candidateYear = specificYear ?? now.getFullYear();
+      const candidateMonth = specificMonth ?? now.getMonth();
+      const candidateDay = specificDay ?? now.getDate();
+      const candidate = new Date(candidateYear, candidateMonth, candidateDay, hours, minutes, seconds);
+
+      if (!specificYear && specificMonth === undefined && specificDay === undefined) {
+        if (/tomorrow|কাল|আগামীকাল/i.test(raw)) {
+          candidate.setDate(candidate.getDate() + 1);
+        }
+      }
+
+      return candidate.getTime();
+    }
+  }
+
+  // If only a future date (after today) was found without a clock time, set to noon of that future date; if today or past without time, return null so user/sync can set the exact time
+  if (specificDay !== undefined && specificMonth !== undefined) {
+    const now = new Date();
+    const y = specificYear ?? now.getFullYear();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const candidateDayStart = new Date(y, specificMonth, specificDay, 0, 0, 0).getTime();
+    if (!isNaN(candidateDayStart) && candidateDayStart > startOfToday) {
+      return new Date(y, specificMonth, specificDay, 12, 0, 0).getTime();
+    }
   }
 
   return null;
@@ -116,10 +268,20 @@ export interface MatchCountdownState {
 }
 
 // Hook that ticks every 1 second and provides countdown data
-export function useMatchCountdown(startTime?: string, isoTime?: string): MatchCountdownState {
+export function useMatchCountdown(startTime?: string, isoTime?: string, fallbackMinutes = 30): MatchCountdownState {
+  const [fallbackTarget] = useState(() => {
+    // Round up to the next 30-minute boundary + 15m so upcoming matches without an explicit timestamp still show a live ticking countdown
+    const slotMs = 30 * 60 * 1000;
+    return Math.ceil(Date.now() / slotMs) * slotMs + fallbackMinutes * 60 * 1000;
+  });
+
   const targetTimestamp = useMemo(() => {
-    return parseMatchStartTimeToTimestamp(startTime, isoTime);
-  }, [startTime, isoTime]);
+    const parsed = parseMatchStartTimeToTimestamp(startTime, isoTime);
+    if (parsed && parsed > Date.now() - 2 * 3600 * 1000) {
+      return parsed;
+    }
+    return fallbackTarget;
+  }, [startTime, isoTime, fallbackTarget]);
 
   const [now, setNow] = useState(() => Date.now());
 
@@ -247,11 +409,11 @@ export const MatchCountdownBadge: React.FC<{
   if (countdown.isStarted) {
     return (
       <span className={cn(
-        "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse whitespace-nowrap",
         className
       )}>
-        <span className="w-2 h-2 rounded-full bg-emerald-400" />
-        <span>{lang === 'bn' ? 'খেলা শুরু হয়েছে! 🏏' : 'Match Starting Now! 🏏'}</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+        <span>{lang === 'bn' ? 'খেলা শুরু হচ্ছে' : 'Starting Now'}</span>
       </span>
     );
   }
@@ -260,13 +422,13 @@ export const MatchCountdownBadge: React.FC<{
 
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-mono font-black border transition-all shadow-xs",
+      "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-mono font-black border transition-all shadow-xs whitespace-nowrap",
       isUrgent
         ? "bg-red-500/20 text-red-300 border-red-500/50 animate-pulse"
         : "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25",
       className
     )}>
-      {showIcon && <Timer size={12} className={cn(isUrgent ? "text-red-400 animate-spin" : "text-amber-400 animate-pulse")} />}
+      {showIcon && <Timer size={11} className={cn("shrink-0", isUrgent ? "text-red-400 animate-spin" : "text-amber-400 animate-pulse")} />}
       <span className="tracking-wider">
         {lang === 'bn' ? countdown.digitalClockBn : countdown.digitalClock}
       </span>
@@ -593,28 +755,43 @@ export const MatchCountdownHero: React.FC<{
 export const MatchStartTimeEditorModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
+  onGoHome?: () => void;
   currentStartTime?: string;
   currentStartTimeIso?: string;
+  currentIsoTime?: string;
   isUpcoming?: boolean;
   lang?: 'en' | 'bn';
-  onSave: (data: { startTime?: string; startTimeIso?: string; isUpcoming: boolean }) => void;
+  onSave: ((data: { startTime?: string; startTimeIso?: string; isUpcoming: boolean }) => void) | ((startTime?: string, isoTime?: string, isUpcoming?: boolean) => void);
+  onClear?: () => void;
 }> = ({
   isOpen,
   onClose,
+  onGoHome,
   currentStartTime = '',
   currentStartTimeIso = '',
+  currentIsoTime = '',
   isUpcoming = false,
   lang = 'bn',
-  onSave
+  onSave,
+  onClear
 }) => {
+  const toLocalDatetimeInputValue = (d: Date) => {
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  };
+
+  const formatDateAndTimeLabel = (d: Date) => {
+    const datePart = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${datePart}, ${timePart}`;
+  };
+
+  const actualIso = currentStartTimeIso || currentIsoTime || '';
   const [dateInput, setDateInput] = useState(() => {
-    if (currentStartTimeIso) {
-      try {
-        const d = new Date(currentStartTimeIso);
-        if (!isNaN(d.getTime())) {
-          return d.toISOString().slice(0, 16);
-        }
-      } catch {}
+    const parsedTs = parseMatchStartTimeToTimestamp(currentStartTime, actualIso);
+    if (parsedTs) {
+      const d = new Date(parsedTs);
+      if (!isNaN(d.getTime())) return toLocalDatetimeInputValue(d);
     }
     return '';
   });
@@ -626,27 +803,25 @@ export const MatchStartTimeEditorModal: React.FC<{
     if (isOpen) {
       setTextInput(currentStartTime || '');
       setUpcomingToggle(isUpcoming || Boolean(currentStartTime));
-      if (currentStartTimeIso) {
-        try {
-          const d = new Date(currentStartTimeIso);
-          if (!isNaN(d.getTime())) {
-            setDateInput(d.toISOString().slice(0, 16));
-            return;
-          }
-        } catch {}
+      const parsedTs = parseMatchStartTimeToTimestamp(currentStartTime, currentStartTimeIso || currentIsoTime);
+      if (parsedTs) {
+        const d = new Date(parsedTs);
+        if (!isNaN(d.getTime())) {
+          setDateInput(toLocalDatetimeInputValue(d));
+          return;
+        }
       }
       setDateInput('');
     }
-  }, [isOpen, currentStartTime, currentStartTimeIso, isUpcoming]);
+  }, [isOpen, currentStartTime, currentStartTimeIso, currentIsoTime, isUpcoming]);
 
   if (!isOpen) return null;
 
   // Preset setter
   const applyOffsetMinutes = (minutes: number) => {
     const target = new Date(Date.now() + minutes * 60000);
-    setDateInput(target.toISOString().slice(0, 16));
-    const timeStr = target.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setTextInput(`${timeStr} (${minutes >= 60 ? `${(minutes / 60).toFixed(1)}h later` : `${minutes}m later`})`);
+    setDateInput(toLocalDatetimeInputValue(target));
+    setTextInput(formatDateAndTimeLabel(target));
     setUpcomingToggle(true);
   };
 
@@ -656,9 +831,8 @@ export const MatchStartTimeEditorModal: React.FC<{
     if (target.getTime() < Date.now() - 3600000) {
       target.setDate(target.getDate() + 1);
     }
-    setDateInput(target.toISOString().slice(0, 16));
-    const timeStr = target.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setTextInput(`Today ${timeStr}`);
+    setDateInput(toLocalDatetimeInputValue(target));
+    setTextInput(formatDateAndTimeLabel(target));
     setUpcomingToggle(true);
   };
 
@@ -672,55 +846,79 @@ export const MatchStartTimeEditorModal: React.FC<{
         if (!isNaN(d.getTime())) {
           finalIso = d.toISOString();
           if (!finalLabel) {
-            finalLabel = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
-              ` (${d.toLocaleDateString([], { month: 'short', day: 'numeric' })})`;
+            finalLabel = formatDateAndTimeLabel(d);
           }
         }
       } catch {}
     }
 
-    onSave({
+    const payload = {
       startTime: finalLabel || undefined,
       startTimeIso: finalIso || undefined,
       isUpcoming: upcomingToggle
-    });
+    };
+
+    if (onSave.length >= 2) {
+      (onSave as any)(finalLabel || undefined, finalIso || undefined, upcomingToggle);
+    } else {
+      (onSave as any)(payload);
+    }
     onClose();
   };
 
   const handleClear = () => {
-    onSave({
-      startTime: undefined,
-      startTimeIso: undefined,
-      isUpcoming: false
-    });
+    if (onClear) {
+      onClear();
+    } else {
+      if (onSave.length >= 2) {
+        (onSave as any)(undefined, undefined, false);
+      } else {
+        (onSave as any)({
+          startTime: undefined,
+          startTimeIso: undefined,
+          isUpcoming: false
+        });
+      }
+    }
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
-      <div 
-        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 space-y-4"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center">
-              <Clock size={16} />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                {lang === 'bn' ? 'ম্যাচ শুরুর সময় ও কাউন্টডাউন' : 'Match Start Time & Countdown'}
-              </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {lang === 'bn' ? 'ম্যাচের শুরু হওয়ার নির্ধারিত সময় নির্ধারণ করুন' : 'Schedule or update match start countdown'}
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
-            <X size={16} />
+    <div className="fixed inset-0 z-[120] bg-[#0b101b] flex flex-col overflow-hidden">
+      {/* Top Full-Page Navigation Bar with Back & Home Buttons */}
+      <div className="p-4 sm:p-5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+          >
+            <ArrowLeft size={14} />
+            <span>{lang === 'bn' ? 'পিছনে' : 'Back'}</span>
           </button>
+          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+            <Clock size={18} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider truncate">
+              {lang === 'bn' ? 'ম্যাচ শুরুর সময় ও কাউন্টডাউন' : 'Match Start Time & Countdown'}
+            </h3>
+            <p className="text-[11px] text-slate-400 truncate">
+              {lang === 'bn' ? 'ম্যাচের শুরু হওয়ার নির্ধারিত সময় নির্ধারণ করুন' : 'Schedule or update match start countdown'}
+            </p>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={onGoHome || onClose}
+          className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all shrink-0 shadow-md shadow-indigo-600/20"
+        >
+          <Home size={14} />
+          <span>{lang === 'bn' ? 'হোম' : 'Home'}</span>
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-2xl w-full mx-auto space-y-5">
 
         {/* Upcoming Status Toggle */}
         <div className="flex items-center justify-between p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30">
@@ -778,8 +976,15 @@ export const MatchStartTimeEditorModal: React.FC<{
             type="datetime-local"
             value={dateInput}
             onChange={e => {
-              setDateInput(e.target.value);
+              const val = e.target.value;
+              setDateInput(val);
               setUpcomingToggle(true);
+              if (val) {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) {
+                  setTextInput(formatDateAndTimeLabel(d));
+                }
+              }
             }}
             className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 font-mono font-bold outline-none focus:border-amber-500 focus:bg-white dark:focus:bg-slate-900"
           />

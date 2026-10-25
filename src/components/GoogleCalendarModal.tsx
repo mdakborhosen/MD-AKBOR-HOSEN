@@ -16,7 +16,9 @@ import {
   Send,
   CalendarCheck,
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  ArrowLeft,
+  Home
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { toast } from 'sonner';
@@ -38,16 +40,26 @@ import {
 interface GoogleCalendarModalProps {
   isOpen: boolean;
   onClose: () => void;
-  schedules: ScheduleEvent[];
+  onGoHome?: () => void;
+  schedules?: ScheduleEvent[];
+  schedule?: ScheduleEvent[];
   activeMatch?: MatchState;
+  currentMatch?: MatchState;
+  lang?: 'en' | 'bn';
 }
 
 export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
   isOpen,
   onClose,
-  schedules,
-  activeMatch,
+  onGoHome,
+  schedules: propSchedules,
+  schedule: altSchedule,
+  activeMatch: propActiveMatch,
+  currentMatch: altMatch,
+  lang = 'en',
 }) => {
+  const schedules = propSchedules || altSchedule || [];
+  const activeMatch = propActiveMatch || altMatch;
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
@@ -272,38 +284,51 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="fixed inset-0 z-[120] bg-[#0b101b] flex flex-col overflow-hidden">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 15 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden my-auto max-h-[90vh] flex flex-col"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="bg-card w-full h-full overflow-hidden flex flex-col"
         >
-          {/* Header */}
-          <div className="p-5 border-b border-border bg-muted/40 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+          {/* Header with Back & Home Buttons */}
+          <div className="p-4 sm:p-5 border-b border-border bg-muted/40 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all shrink-0"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>{lang === 'bn' ? 'পিছনে' : 'Back'}</span>
+              </button>
+              <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <CalendarIcon className="w-5 h-5" />
               </div>
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                  Google Calendar Sync
-                  <Badge variant="secondary" className="text-xs bg-primary/10 text-primary hover:bg-primary/20">
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-xl font-bold tracking-tight text-foreground flex items-center gap-2 truncate">
+                  <span>Google Calendar Sync</span>
+                  <Badge variant="secondary" className="text-xs bg-primary/10 text-primary hover:bg-primary/20 hidden sm:inline-flex">
                     Workspace API
                   </Badge>
                 </h2>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[11px] sm:text-xs text-muted-foreground truncate">
                   Sync tournament schedules, match reminders, and fixture results directly to Google Calendar.
                 </p>
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full">
-              <X className="w-5 h-5" />
-            </Button>
+            <button
+              type="button"
+              onClick={onGoHome || onClose}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all shrink-0 shadow-md shadow-indigo-600/20"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>{lang === 'bn' ? 'হোম' : 'Home'}</span>
+            </button>
           </div>
 
           {/* Body Content */}
-          <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6 max-w-4xl w-full mx-auto">
             {/* Account Sign-In / User Banner */}
             {!user ? (
               <Card className="bg-gradient-to-br from-primary/5 via-primary/10 to-transparent border-primary/20">

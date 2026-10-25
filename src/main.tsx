@@ -3,22 +3,23 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { Toaster } from '@/components/ui/sonner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Automatically check for new updates and ensure client has the latest app version
+// Automatically check for new updates with reload loop guard
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.ready.then((registration) => {
-    registration.update().catch(() => {});
-  });
-
+  let refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // New service worker activated, reload to get fresh assets
+    if (refreshing) return;
+    refreshing = true;
     window.location.reload();
   });
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
-    <Toaster position="top-center" />
+    <ErrorBoundary>
+      <App />
+      <Toaster position="top-center" />
+    </ErrorBoundary>
   </StrictMode>,
 );

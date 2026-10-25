@@ -1,6 +1,6 @@
 {
-  "name": "Remix Cricket Score Master",
-  "description": "A ball-by-ball cricket scoring and bet slip studio application with real-time updates and AI extraction.",
+  "name": "⚽🏏 .score",
+  "description": "⚽🏏 .score — Live Cricket & Football Scoreboard, Full Player Scorecards, and Bet Slip Studio.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

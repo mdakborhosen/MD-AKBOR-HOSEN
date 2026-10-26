@@ -230,6 +230,9 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
         score: nextScore,
         wickets: nextWickets,
         balls: nextBalls,
+        history: [],
+        liveRecentBalls: [],
+        liveRecentOvers: [],
         team1Score: nextTeam1Score,
         team2Score: nextTeam2Score,
         firstInningsScore: nextFirstInnings,
@@ -1170,14 +1173,23 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
     );
   };
 
-  // Calculate full two overs (including all extra balls)
+  // Calculate full two overs (including all extra balls) aligned with the ongoing innings
   const recentTwoOvers = useMemo(() => {
     type BallItem = { symbol: string; isExtra: boolean; isWicket: boolean; runs: number };
     type OverItem = { overNumber: number; balls: BallItem[]; runs: number; wickets: number };
 
-    // Determine the current over number and completed overs of the ONGOING INNINGS (চলমান ইনিংস)
-    const { ongoingCompletedOvers, ongoingCurrentOverNum } = (() => {
-      const bpo = ballsPerOver || 6;
+    const bpo = ballsPerOver || 6;
+
+    // Helper: determine whether a ball symbol is a re-bowled extra (wide, no ball)
+    const isRebowledExtra = (s: string): boolean =>
+      Boolean(s && /^(?:WD(?:\+\d+)?|NB(?:\+\d+)?(?:\s*🔥)?)$/i.test(s.trim()));
+
+    // Helper: determine whether a ball symbol is a wicket
+    const isWktSym = (s: string): boolean =>
+      Boolean(s && /^(?:C(?:\+\d+)?|B(?:\+\d+)?|LBW|R(?:\+\d+)?|W(?:\+\d+)?|Wickets|Caught|Bowled|Run Out|Stumped|Hit Wicket)$/i.test(s.trim()));
+
+    // 1. Determine the completed overs, current balls in over, and current over number of the ONGOING INNINGS (চলমান ইনিংস)
+    const { ongoingCompletedOvers, ongoingBallsInCurrentOver, ongoingCurrentOverNum } = (() => {
       // Ongoing batting team's score & overs
       const activeOversStr = isT2Batting
         ? (t2ScoreParts.oversPart || team2DisplayScore || '')
@@ -1191,6 +1203,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
         const curOv = inOv > 0 ? comp + 1 : Math.max(1, comp);
         return {
           ongoingCompletedOvers: comp,
+          ongoingBallsInCurrentOver: inOv,
           ongoingCurrentOverNum: curOv
         };
       }
@@ -1202,41 +1215,60 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       const curOv = inOv > 0 ? comp + 1 : Math.max(1, comp);
       return {
         ongoingCompletedOvers: comp,
+        ongoingBallsInCurrentOver: inOv,
         ongoingCurrentOverNum: curOv
       };
     })();
 
-    // Helper to format & number overs strictly aligned with the ongoing innings (চলমান ইনিংস)
-    const formatOngoingOvers = (oversList: OverItem[]): OverItem[] => {
-      if (oversList.length === 0) return [];
-
-      // If the ongoing innings has only completed 0 overs (e.g. 0.4 ov), only show 1 over (Over 1).
-      // If 1 or more overs have been completed (e.g. 1.5 ov), show 2 overs (Over 1 and Over 2).
-      const oversToTake = ongoingCompletedOvers === 0 ? 1 : 2;
-      const sliced = oversList.slice(-oversToTake);
-
-      if (sliced.length === 2) {
-        sliced[0].overNumber = Math.max(1, ongoingCurrentOverNum - 1);
-        sliced[1].overNumber = ongoingCurrentOverNum;
-      } else if (sliced.length === 1) {
-        sliced[0].overNumber = ongoingCurrentOverNum;
+    // 2. If structured live recent overs exist (e.g. from Crex sv3.lastovers), prefer them directly
+    if (match.liveRecentOvers && match.liveRecentOvers.length > 0) {
+      const liveOvers = match.liveRecentOvers;
+      const res: OverItem[] = [];
+      const len = liveOvers.length;
+      if (len >= 2) {
+        const prevOvData = liveOvers[len - 2];
+        const curOvData = liveOvers[len - 1];
+        res.push({
+          overNumber: Math.max(1, ongoingCurrentOverNum - 1),
+          balls: prevOvData.balls.map(s => {
+            const sym = formatBallSymbolToCallout(s) || s;
+            return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
+          }),
+          runs: 0,
+          wickets: 0
+        });
+        res.push({
+          overNumber: ongoingCurrentOverNum,
+          balls: curOvData.balls.map(s => {
+            const sym = formatBallSymbolToCallout(s) || s;
+            return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
+          }),
+          runs: 0,
+          wickets: 0
+        });
+        return res;
+      } else if (len === 1) {
+        const curOvData = liveOvers[0];
+        res.push({
+          overNumber: ongoingCurrentOverNum,
+          balls: curOvData.balls.map(s => {
+            const sym = formatBallSymbolToCallout(s) || s;
+            return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
+          }),
+          runs: 0,
+          wickets: 0
+        });
+        return res;
       }
-      return sliced;
-    };
+    }
 
-    // 1. Try to compute from match.history if available
-    if (match.history && match.history.length > 0) {
-      const chronological = [...match.history].reverse();
-      const allOvers: OverItem[] = [];
-      let overNum = 1;
-      let legalBalls = 0;
-      let curBalls: BallItem[] = [];
-      let curRuns = 0;
-      let curWkts = 0;
+    // 3. Fallback: Extract raw ball sequence from liveRecentBalls or match.history
+    const rawFromLive: string[] = (match.liveRecentBalls && match.liveRecentBalls.length > 0)
+      ? match.liveRecentBalls.map(s => formatBallSymbolToCallout(s) || s).filter(Boolean)
+      : [];
 
-      for (const e of chronological) {
-        const isExtra = Boolean(e.isWide || e.isNoBall);
-        const sym = (() => {
+    const rawFromHistory: string[] = (match.history && match.history.length > 0)
+      ? [...match.history].reverse().map(e => {
           if (e.isWicket) {
             const wType = String(e.wicketType || '').toLowerCase();
             let code = 'W';
@@ -1255,112 +1287,92 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
             const r = (e.runsOnly !== undefined ? e.runsOnly : Math.max(0, (e.runs || 1) - 1));
             return r > 0 ? `WD+${r}` : 'WD';
           }
-          if (e.isLegBye) {
-            return `${e.runs || 1}lb`;
-          }
-          if (e.isBye) {
-            return `${e.runs || 1}b`;
-          }
-          if (e.wasFreeHit) {
-            const r = e.runs || 0;
-            return r === 0 ? 'Free Hit 🔥' : `${r} 🔥`;
-          }
+          if (e.isLegBye) return `${e.runs || 1}lb`;
+          if (e.isBye) return `${e.runs || 1}b`;
+          if (e.wasFreeHit) return (e.runs || 0) === 0 ? 'Free Hit 🔥' : `${e.runs} 🔥`;
           const r = e.runs ?? 0;
           return r === 0 ? '.' : String(r);
-        })();
+        }).filter(Boolean)
+      : [];
 
-        curBalls.push({
-          symbol: sym,
-          isExtra,
-          isWicket: Boolean(e.isWicket),
-          runs: e.runs || 0
-        });
-        curRuns += (e.runs || 0);
-        if (e.isWicket) curWkts++;
+    const ballSequence = rawFromLive.length >= rawFromHistory.length
+      ? rawFromLive
+      : (rawFromHistory.length > 0 ? rawFromHistory : rawFromLive);
 
-        if (!isExtra) {
-          legalBalls++;
-          if (legalBalls >= ballsPerOver) {
-            allOvers.push({
-              overNumber: overNum,
-              balls: curBalls,
-              runs: curRuns,
-              wickets: curWkts
-            });
-            overNum++;
-            legalBalls = 0;
-            curBalls = [];
-            curRuns = 0;
-            curWkts = 0;
-          }
-        }
+    if (ballSequence.length === 0) return [];
+
+    // Chunk ballSequence from oldest to newest by legal ball boundaries
+    const chunks: string[][] = [];
+    let currentChunk: string[] = [];
+    let chunkLegal = 0;
+
+    for (let i = 0; i < ballSequence.length; i++) {
+      const sym = ballSequence[i];
+      currentChunk.push(sym);
+      if (!isRebowledExtra(sym)) {
+        chunkLegal++;
       }
-
-      if (curBalls.length > 0) {
-        allOvers.push({
-          overNumber: overNum,
-          balls: curBalls,
-          runs: curRuns,
-          wickets: curWkts
-        });
-      }
-
-      if (allOvers.length > 0) {
-        return formatOngoingOvers(allOvers);
+      if (chunkLegal >= bpo) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+        chunkLegal = 0;
       }
     }
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
 
-    // 2. Fallback to match.liveRecentBalls
-    if (match.liveRecentBalls && match.liveRecentBalls.length > 0) {
-      const allOvers: OverItem[] = [];
-      let overNum = 1;
-      let legalBalls = 0;
-      let curBalls: BallItem[] = [];
+    if (chunks.length === 0) return [];
 
-      for (const symRaw of match.liveRecentBalls) {
-        const sym = formatBallSymbolToCallout(symRaw) || symRaw;
-        const isExtra = /^(?:WD(?:\+\d+)?|NB(?:\+\d+)?|Free\s*Hit)/i.test(sym);
-        const isWkt = /^(?:C|B|LBW|R(?:\+\d+)?|W(?:\+\d+)?|Wickets|Caught|Bowled|Run Out|Stumped|Hit Wicket)$/i.test(sym);
+    const maxAllowedOvers = ongoingCompletedOvers + (ongoingBallsInCurrentOver > 0 ? 1 : 0);
+    const resultOvers: OverItem[] = [];
 
-        curBalls.push({
-          symbol: sym,
-          isExtra,
-          isWicket: isWkt,
+    if (maxAllowedOvers <= 1 || chunks.length === 1) {
+      // Show only current over
+      const latestChunk = chunks[chunks.length - 1];
+      resultOvers.push({
+        overNumber: ongoingCurrentOverNum,
+        balls: latestChunk.map(s => ({
+          symbol: s,
+          isExtra: isRebowledExtra(s),
+          isWicket: isWktSym(s),
           runs: 0
-        });
+        })),
+        runs: 0,
+        wickets: 0
+      });
+    } else {
+      // Show previous completed over and current ongoing over
+      const prevChunk = chunks[chunks.length - 2];
+      const curChunk = chunks[chunks.length - 1];
 
-        if (!isExtra) {
-          legalBalls++;
-          if (legalBalls >= ballsPerOver) {
-            allOvers.push({
-              overNumber: overNum,
-              balls: curBalls,
-              runs: 0,
-              wickets: 0
-            });
-            overNum++;
-            legalBalls = 0;
-            curBalls = [];
-          }
-        }
-      }
+      resultOvers.push({
+        overNumber: Math.max(1, ongoingCurrentOverNum - 1),
+        balls: prevChunk.map(s => ({
+          symbol: s,
+          isExtra: isRebowledExtra(s),
+          isWicket: isWktSym(s),
+          runs: 0
+        })),
+        runs: 0,
+        wickets: 0
+      });
 
-      if (curBalls.length > 0) {
-        allOvers.push({
-          overNumber: overNum,
-          balls: curBalls,
-          runs: 0,
-          wickets: 0
-        });
-      }
-
-      if (allOvers.length > 0) {
-        return formatOngoingOvers(allOvers);
-      }
+      resultOvers.push({
+        overNumber: ongoingCurrentOverNum,
+        balls: curChunk.map(s => ({
+          symbol: s,
+          isExtra: isRebowledExtra(s),
+          isWicket: isWktSym(s),
+          runs: 0
+        })),
+        runs: 0,
+        wickets: 0
+      });
     }
 
-    return [];
-  }, [match.history, match.liveRecentBalls, match.balls, ballsPerOver, isT2Batting, t1ScoreParts, t2ScoreParts, team1DisplayScore, team2DisplayScore]);
+    return resultOvers;
+  }, [match.history, match.liveRecentBalls, match.liveRecentOvers, match.balls, ballsPerOver, isT2Batting, t1ScoreParts, t2ScoreParts, team1DisplayScore, team2DisplayScore]);
 
   const sanitizeStatusStr = (raw?: string): string => {
     if (!raw) return '';
@@ -2089,7 +2101,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
               </div>
               <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
                 {recentTwoOvers.map((ov, ovIdx) => (
-                  <div key={ov.overNumber} className="flex items-center gap-1 shrink-0">
+                  <div key={`recent-over-${ov.overNumber}-${ovIdx}`} className="flex items-center gap-1 shrink-0">
                     <span className="px-1.5 py-0.5 rounded-md bg-white/[0.08] border border-white/15 text-[9px] sm:text-[10px] font-black text-slate-300">
                       {lang === 'bn' ? `ওভার ${toBengaliDigits(ov.overNumber)}` : `Ov ${ov.overNumber}`}
                     </span>

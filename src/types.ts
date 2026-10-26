@@ -147,6 +147,7 @@ export type MatchState = {
   liveStatusText?: string;
   liveSyncError?: string;
   liveRecentBalls?: string[];
+  liveRecentOvers?: Array<{ overNumber?: number; balls: string[] }>;
   liveBowler?: string;
   liveBowlerStats?: BowlerStats;
   liveBallEvent?: string;

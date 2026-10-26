@@ -3223,6 +3223,7 @@ async function parseLiveCricketUrlCore(
   let matchStartTimeIso = "";
   let firstInningsScore: string | number | undefined = undefined;
   const recentBalls: string[] = [];
+  const recentOversListStructured: Array<{ overNumber?: number; balls: string[] }> = [];
   const batsmen: any[] = [];
   let bowler: any = null;
 
@@ -3996,6 +3997,7 @@ async function parseLiveCricketUrlCore(
       team2ScoreStr = undefined;
       batsmen.length = 0;
       recentBalls.length = 0;
+      recentOversListStructured.length = 0;
       if (statusText && /\b(?:won\s+by|need[s]?\s+\d+\s+runs?)\b/i.test(statusText)) {
         statusText = "";
       }
@@ -4154,19 +4156,39 @@ async function parseLiveCricketUrlCore(
         else if (outCode === "6") sv3LastWicketMethod = "Hit Wicket";
       }
 
-      // Extract recent balls from sv3.lastovers or sv3.rb
+      // Extract recent balls from sv3.lastovers (extract last 2 full overs including all extras!)
       if (Array.isArray(sv3.lastovers) && sv3.lastovers.length > 0) {
-        const latestOverObj = sv3.lastovers[sv3.lastovers.length - 1];
-        if (latestOverObj && Array.isArray(latestOverObj.overinfo) && latestOverObj.overinfo.length > 0) {
-          const rawOverBalls = latestOverObj.overinfo.map((x: any) => String(x || "").trim()).filter(Boolean);
-          if (rawOverBalls.length > 0) {
-            sv3LastBallToken = rawOverBalls[rawOverBalls.length - 1];
-            if (recentBalls.length === 0) {
-              for (const rbTok of rawOverBalls.slice(-8)) {
-                recentBalls.push(normalizeCricketBallToken(rbTok, sv3LastWicketMethod));
+        const recentOversList = sv3.lastovers.slice(-2);
+        const collectedBalls: string[] = [];
+        for (let i = 0; i < recentOversList.length; i++) {
+          const overObj = recentOversList[i];
+          if (overObj && Array.isArray(overObj.overinfo) && overObj.overinfo.length > 0) {
+            const rawOverBalls = overObj.overinfo.map((x: any) => String(x || "").trim()).filter(Boolean);
+            const thisOverBalls: string[] = [];
+            for (const rbTok of rawOverBalls) {
+              const norm = normalizeCricketBallToken(rbTok, sv3LastWicketMethod);
+              if (norm) {
+                thisOverBalls.push(norm);
+                collectedBalls.push(norm);
               }
             }
+            if (thisOverBalls.length > 0) {
+              const rawNum = typeof overObj.overnum === "number" ? overObj.overnum
+                : typeof overObj.over === "number" ? overObj.over
+                : typeof overObj.ov === "number" ? overObj.ov
+                : typeof overObj.o === "number" ? overObj.o
+                : undefined;
+              recentOversListStructured.push({
+                overNumber: rawNum,
+                balls: thisOverBalls
+              });
+            }
           }
+        }
+        if (collectedBalls.length > 0) {
+          sv3LastBallToken = collectedBalls[collectedBalls.length - 1];
+          recentBalls.length = 0;
+          recentBalls.push(...collectedBalls);
         }
       }
 
@@ -4892,7 +4914,7 @@ async function parseLiveCricketUrlCore(
   // Recent balls commentary
   $(".cb-mini-col, .ds-flex.ds-space-x-1 span, .ds-text-tight-s, [class*='recent'] span").each((_i, el) => {
     const txt = $(el).text().trim();
-    if (/^([0-6]|W|Wd|Nb|•|\.)$/i.test(txt) && recentBalls.length < 8) {
+    if (/^([0-6]|W|Wd|Nb|•|\.)$/i.test(txt) && recentBalls.length < 30) {
       recentBalls.push(txt === "." ? "•" : txt);
     }
   });
@@ -4967,6 +4989,7 @@ async function parseLiveCricketUrlCore(
     matchStartTimeIso: matchStartTimeIso || undefined,
     statusText: statusText || (upcomingDetected ? `Upcoming • ${team1 || 'Team 1'} vs ${team2 || 'Team 2'}` : `${battingTeam || 'Team'} ${score}/${wickets} (${overs}.${ballsInOver} ov)`),
     recentBalls: upcomingDetected ? [] : recentBalls,
+    recentOvers: upcomingDetected ? undefined : (recentOversListStructured.length > 0 ? recentOversListStructured : undefined),
     lastBallSymbol: upcomingDetected ? undefined : (recentBalls.length > 0 ? recentBalls[recentBalls.length - 1] : undefined),
     batsmen,
     battingStats: activeBattingStats.length > 0 ? activeBattingStats : undefined,

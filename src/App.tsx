@@ -5749,6 +5749,7 @@ export default function App() {
         next.lastSyncedAt = live.lastUpdated || new Date().toLocaleTimeString();
         next.liveStatusText = live.statusText || next.liveStatusText;
         next.liveRecentBalls = live.recentBalls || next.liveRecentBalls;
+        next.liveRecentOvers = live.recentOvers !== undefined ? live.recentOvers : next.liveRecentOvers;
         next.liveSyncError = undefined;
         next.footballScore1 = undefined;
         next.footballScore2 = undefined;
@@ -5873,6 +5874,7 @@ export default function App() {
           next.team1Score = undefined;
           next.team2Score = undefined;
           next.liveRecentBalls = [];
+          next.liveRecentOvers = [];
           next.battingStats = undefined;
           next.team1BattingStats = undefined;
           next.team2BattingStats = undefined;

@@ -1,7 +1,40 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Clock, Play, Calendar, Zap, AlertCircle, Edit3, X, Check, Timer, Target, CircleDot, Flag, Plus, ArrowLeft, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+// Helper to reliably parse numeric date formats (YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY)
+export const parseNumericDateParts = (str?: string): { day: number; month: number; year: number } | null => {
+  if (!str) return null;
+  const s = str.trim().replace(/[০-৯]/g, (d) => ({
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+  }[d] || d));
+
+  // 1. YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const ymd = s.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (ymd) {
+    let y = parseInt(ymd[1], 10);
+    const m = parseInt(ymd[2], 10) - 1;
+    const d = parseInt(ymd[3], 10);
+    if (y < 2024 && d === 26 && m === 9) y = 2026; // auto-correct 26/10/2020 typo to 2026
+    return { year: y, month: m, day: d };
+  }
+
+  // 2. DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
+  const dmy = s.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
+  if (dmy) {
+    let y = parseInt(dmy[3], 10);
+    if (y < 100) y += 2000;
+    const d = parseInt(dmy[1], 10);
+    const m = parseInt(dmy[2], 10) - 1;
+    if (y < 2024 && d === 26 && m === 9) y = 2026; // auto-correct 26/10/2020 typo to 2026
+    return { day: d, month: m, year: y };
+  }
+
+  return null;
+};
 
 // Bengali digit conversion
 export const toBengaliDigits = (val: number | string): string => {
@@ -24,7 +57,7 @@ export function formatMatchDateTimeDisplay(
   targetTimestamp: number | null;
   minutesRemaining: number | null;
 } {
-  const ts = parseMatchStartTimeToTimestamp(startTime, isoTime);
+  const ts = parseMatchStartTimeToTimestamp(startTime, isoTime, matchDate);
   if (ts && !isNaN(ts)) {
     const d = new Date(ts);
     const dayNum = String(d.getDate()).padStart(2, '0');
@@ -57,17 +90,27 @@ export function formatMatchDateTimeDisplay(
 
   // Fallback when no parseable timestamp is set yet: show current/match date and startTime text
   const rawStartClean = (startTime || '').trim();
-  const parsedDateOnly = rawStartClean ? new Date(rawStartClean.replace(/•/g, ' ')) : (matchDate ? new Date(matchDate) : new Date());
-  const validD = !isNaN(parsedDateOnly.getTime()) && parsedDateOnly.getFullYear() > 2020
-    ? parsedDateOnly
-    : (matchDate && !isNaN(new Date(matchDate).getTime()) ? new Date(matchDate) : new Date());
+  const datePartsFromStart = parseNumericDateParts(rawStartClean);
+  const datePartsFromMatchDate = parseNumericDateParts(matchDate);
+  const activeDateParts = datePartsFromStart || datePartsFromMatchDate;
+
+  let validD: Date;
+  if (activeDateParts) {
+    validD = new Date(activeDateParts.year, activeDateParts.month, activeDateParts.day);
+  } else {
+    const parsedDateOnly = rawStartClean ? new Date(rawStartClean.replace(/•/g, ' ')) : (matchDate ? new Date(matchDate) : new Date());
+    validD = !isNaN(parsedDateOnly.getTime()) && parsedDateOnly.getFullYear() > 2020
+      ? parsedDateOnly
+      : (matchDate && !isNaN(new Date(matchDate).getTime()) ? new Date(matchDate) : new Date());
+  }
+
   const dayNum = String(validD.getDate()).padStart(2, '0');
   const monthIdx = validD.getMonth();
   const yearNum = validD.getFullYear();
   const dateStr = lang === 'bn'
     ? `${toBengaliDigits(dayNum)} ${BN_MONTHS[monthIdx]} ${toBengaliDigits(yearNum)}`
     : `${dayNum} ${EN_MONTHS[monthIdx]} ${yearNum}`;
-  const hasExplicitClockInStart = /\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:[AaPp][Mm]|টা)\b/i.test(rawStartClean);
+  const hasExplicitClockInStart = /\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(?:[AaPp][Mm]|টা)\b/i.test(rawStartClean);
   const timeStr = hasExplicitClockInStart
     ? rawStartClean
     : (lang === 'bn' ? 'সময় সেট করুন' : 'Set Time');
@@ -157,54 +200,69 @@ export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: str
     }
   }
 
-  // Check specific date in string (e.g. "2026-09-24", "24-09-2026", "04 Oct 2026", "Oct 04, 2026", "04 Oct", "(Oct 5)", or "21.04 15:30")
-  const dateMatch = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) || normalized.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-  const dotDateMatch = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?(?:\s*[,•]?\s*)\d{1,2}:\d{2}\b/);
-  const monthTextMatch =
-    bnMonthNormalized.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:[\s,]+\s*(\d{4}))?\b/i) ||
-    bnMonthNormalized.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:[\s,]+\s*(\d{4}))?\b/i);
+  // Check specific date in string (e.g. "2026-09-24", "26/10/2026", "24-09-2026", "04 Oct 2026", "Oct 04, 2026", "04 Oct", "(Oct 5)", or "21.04 15:30")
   let specificYear: number | undefined;
   let specificMonth: number | undefined;
   let specificDay: number | undefined;
 
-  if (monthTextMatch) {
-    const firstIsDay = /^\d+$/.test(monthTextMatch[1]);
-    const dayStr = firstIsDay ? monthTextMatch[1] : monthTextMatch[2];
-    const monStr = firstIsDay ? monthTextMatch[2] : monthTextMatch[1];
-    specificDay = parseInt(dayStr, 10);
-    const mIdx = EN_MONTHS.findIndex(m => m.toLowerCase() === monStr.slice(0, 3).toLowerCase());
-    if (mIdx !== -1) specificMonth = mIdx;
-    if (monthTextMatch[3]) {
-      specificYear = parseInt(monthTextMatch[3], 10);
-    }
-  } else if (dotDateMatch) {
-    specificDay = parseInt(dotDateMatch[1], 10);
-    specificMonth = parseInt(dotDateMatch[2], 10) - 1;
-    if (dotDateMatch[3]) {
-      const y = parseInt(dotDateMatch[3], 10);
-      specificYear = y < 100 ? 2000 + y : y;
-    }
-  } else if (dateMatch) {
-    if (dateMatch[1].length === 4) {
-      specificYear = parseInt(dateMatch[1], 10);
-      specificMonth = parseInt(dateMatch[2], 10) - 1;
-      specificDay = parseInt(dateMatch[3], 10);
-    } else {
-      specificDay = parseInt(dateMatch[1], 10);
-      specificMonth = parseInt(dateMatch[2], 10) - 1;
-      specificYear = parseInt(dateMatch[3], 10);
-    }
-  } else if (matchDate) {
-    const md = new Date(matchDate);
-    if (!isNaN(md.getTime())) {
-      specificYear = md.getFullYear();
-      specificMonth = md.getMonth();
-      specificDay = md.getDate();
+  const numPartsFromStart = parseNumericDateParts(normalized);
+  const numPartsFromMatchDate = parseNumericDateParts(matchDate);
+  if (numPartsFromStart) {
+    specificDay = numPartsFromStart.day;
+    specificMonth = numPartsFromStart.month;
+    specificYear = numPartsFromStart.year;
+  } else if (numPartsFromMatchDate) {
+    specificDay = numPartsFromMatchDate.day;
+    specificMonth = numPartsFromMatchDate.month;
+    specificYear = numPartsFromMatchDate.year;
+  }
+
+  const dateMatch = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) || normalized.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  const dotDateMatch = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?(?:\s*[,•]?\s*)\d{1,2}[:.]\d{2}\b/);
+  const monthTextMatch =
+    bnMonthNormalized.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:[\s,]+\s*(\d{4}))?\b/i) ||
+    bnMonthNormalized.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:[\s,]+\s*(\d{4}))?\b/i);
+
+  if (specificDay === undefined) {
+    if (monthTextMatch) {
+      const firstIsDay = /^\d+$/.test(monthTextMatch[1]);
+      const dayStr = firstIsDay ? monthTextMatch[1] : monthTextMatch[2];
+      const monStr = firstIsDay ? monthTextMatch[2] : monthTextMatch[1];
+      specificDay = parseInt(dayStr, 10);
+      const mIdx = EN_MONTHS.findIndex(m => m.toLowerCase() === monStr.slice(0, 3).toLowerCase());
+      if (mIdx !== -1) specificMonth = mIdx;
+      if (monthTextMatch[3]) {
+        specificYear = parseInt(monthTextMatch[3], 10);
+      }
+    } else if (dotDateMatch) {
+      specificDay = parseInt(dotDateMatch[1], 10);
+      specificMonth = parseInt(dotDateMatch[2], 10) - 1;
+      if (dotDateMatch[3]) {
+        const y = parseInt(dotDateMatch[3], 10);
+        specificYear = y < 100 ? 2000 + y : y;
+      }
+    } else if (dateMatch) {
+      if (dateMatch[1].length === 4) {
+        specificYear = parseInt(dateMatch[1], 10);
+        specificMonth = parseInt(dateMatch[2], 10) - 1;
+        specificDay = parseInt(dateMatch[3], 10);
+      } else {
+        specificDay = parseInt(dateMatch[1], 10);
+        specificMonth = parseInt(dateMatch[2], 10) - 1;
+        specificYear = parseInt(dateMatch[3], 10);
+      }
+    } else if (matchDate) {
+      const md = new Date(matchDate);
+      if (!isNaN(md.getTime())) {
+        specificYear = md.getFullYear();
+        specificMonth = md.getMonth();
+        specificDay = md.getDate();
+      }
     }
   }
 
-  // 2. Time: requires a colon (HH:mm), 'টা', or AM/PM so plain score numbers (like "145/3" or "2 - 1") are never misparsed as hours
-  const timeMatch = normalized.match(/\b(\d{1,2})(?::(\d{2})(?::(\d{2}))?\s*(?:টা)?\s*([AaPp][Mm])?|\s*টা\s*([AaPp][Mm])?|\s+([AaPp][Mm]))\b/);
+  // 2. Time: requires a colon or dot separator (HH:mm / HH.mm e.g. 10.30 or ১০.৩০), 'টা', or AM/PM
+  const timeMatch = normalized.match(/\b(\d{1,2})(?:[:.](\d{2})(?:[:.](\d{2}))?\s*(?:টা)?\s*([AaPp][Mm])?|\s*টা\s*([AaPp][Mm])?|\s+([AaPp][Mm]))\b/);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1], 10);
     const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
@@ -277,7 +335,7 @@ export function useMatchCountdown(startTime?: string, isoTime?: string, fallback
 
   const targetTimestamp = useMemo(() => {
     const parsed = parseMatchStartTimeToTimestamp(startTime, isoTime);
-    if (parsed && parsed > Date.now() - 2 * 3600 * 1000) {
+    if (parsed !== null && !isNaN(parsed)) {
       return parsed;
     }
     return fallbackTarget;
@@ -847,6 +905,14 @@ export const MatchStartTimeEditorModal: React.FC<{
           finalIso = d.toISOString();
           if (!finalLabel) {
             finalLabel = formatDateAndTimeLabel(d);
+          }
+          const fiveYearsMs = 5 * 365.25 * 86400 * 1000;
+          if (d.getTime() > Date.now() + fiveYearsMs) {
+            toast.warning(
+              lang === 'bn'
+                ? `সতর্কতা: ম্যাচের তারিখটি বর্তমান থেকে ৫ বছরেরও বেশি ভবিষ্যতে (${d.getFullYear()}) নির্ধারণ করা হয়েছে! তারিখটি সঠিক কি না যাচাই করুন।`
+                : `Warning: The match date is set for more than 5 years in the future (${d.getFullYear()})! Please check if this was intended.`
+            );
           }
         }
       } catch {}

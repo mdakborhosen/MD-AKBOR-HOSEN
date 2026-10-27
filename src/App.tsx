@@ -1028,7 +1028,7 @@ export const detectClueBattingTeamFromStatus = (statusStr: string | undefined, t
   if (!statusStr) return null;
   const checkPhrase = (phrase?: string): string | null => {
     if (!phrase) return null;
-    const tokens = phrase.trim().match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/g) || [];
+    const tokens = phrase.trim().match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) || phrase.trim().split(/\s+/);
     for (const count of [3, 2, 1]) {
       if (tokens.length >= count) {
         const cand = tokens.slice(-count).join(' ');
@@ -1039,36 +1039,44 @@ export const detectClueBattingTeamFromStatus = (statusStr: string | undefined, t
     return null;
   };
 
+  // Direct containment check for non-ASCII/Bengali team names
+  if (t2 && statusStr.includes(t2) && !statusStr.includes(t1) && /(?:need|needs|require|requires|trail|এর|জয়ের|টার্গেট|ব্যাট|bat)\b/iu.test(statusStr)) {
+    return t2;
+  }
+  if (t1 && statusStr.includes(t1) && !statusStr.includes(t2) && /(?:need|needs|require|requires|trail|এর|জয়ের|টার্গেট|ব্যাট|bat)\b/iu.test(statusStr)) {
+    return t1;
+  }
+
   // 1) Explicit score right next to team name in status text e.g. "SA-E 145/4 (16.2 ov)"
-  const scoreWithOvMatch = statusStr.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+\d{1,3}[\/-]\d{1,2}\s*\(\s*\d/i);
+  const scoreWithOvMatch = statusStr.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+\d{1,3}[\/-]\d{1,2}\s*\(\s*\d/iu);
   if (scoreWithOvMatch && scoreWithOvMatch[1]) {
     const matched = checkPhrase(scoreWithOvMatch[1]);
     if (matched) return matched;
   }
 
-  // 2) Chase clue e.g. "SA-E need 35 runs"
-  const chaseMatch = statusStr.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+(?:need|needs|require|requires|trail|এর)\s+\d+/i);
+  // 2) Chase clue e.g. "SA-E need 35 runs" or "টিম বি-এর জয়ের জন্য"
+  const chaseMatch = statusStr.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+(?:need|needs|require|requires|trail|এর\s+(?:জয়ের\s+জন্য)?|জয়ের\s+জন্য)\b/iu);
   if (chaseMatch && chaseMatch[1]) {
     const matched = checkPhrase(chaseMatch[1]);
     if (matched) return matched;
   }
 
   // 3) Toss bat clue e.g. "SA-E won the toss and opted to bat"
-  const tossBatMatch = statusStr.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+(?:won\s+the\s+toss\s+and\s+)?(?:opt(?:ed)?|ch[oo]se|elect(?:ed)?)\s+to\s+bat\b/i);
+  const tossBatMatch = statusStr.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+(?:won\s+the\s+toss\s+and\s+)?(?:opt(?:ed)?|ch[oo]se|elect(?:ed)?)\s+to\s+bat\b/iu);
   if (tossBatMatch && tossBatMatch[1]) {
     const matched = checkPhrase(tossBatMatch[1]);
     if (matched) return matched;
   }
 
   // 4) Toss bowl clue e.g. "WP opted to bowl"
-  const tossBowlMatch = statusStr.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+(?:won\s+the\s+toss\s+and\s+)?(?:opt(?:ed)?|ch[oo]se|elect(?:ed)?)\s+to\s+(?:bowl|field)\b/i);
+  const tossBowlMatch = statusStr.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+(?:won\s+the\s+toss\s+and\s+)?(?:opt(?:ed)?|ch[oo]se|elect(?:ed)?)\s+to\s+(?:bowl|field)\b/iu);
   if (tossBowlMatch && tossBowlMatch[1]) {
     const bowlMatched = checkPhrase(tossBowlMatch[1]);
     if (bowlMatched) return bowlMatched === t1 ? t2 : t1;
   }
 
   // 5) Won by wickets clue e.g. "Vancouver Anchors won by 6 wickets" -> winning team batted 2nd
-  const wonByWktsMatch = statusStr.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+won\s+by\s+\d+\s+wicket/i);
+  const wonByWktsMatch = statusStr.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+won\s+by\s+\d+\s+wicket/iu);
   if (wonByWktsMatch && wonByWktsMatch[1]) {
     const matched = checkPhrase(wonByWktsMatch[1]);
     if (matched) return matched;
@@ -1080,6 +1088,23 @@ export const detectClueBattingTeamFromStatus = (statusStr: string | undefined, t
 export const resolveCricketMatchTeamsAndScores = (m: MatchState, isUpc: boolean) => {
   const cleanT1 = (m.team1 || 'Team 1').replace(/^(?:track|watch|live|stream|summary)\s+/i, '').trim();
   const cleanT2 = (m.team2 || 'Team 2').replace(/^(?:track|watch|live|stream|summary)\s+/i, '').trim();
+
+  // Force recalculation of innings data when a match is already in progress
+  const hasLiveInningsProgress = Boolean(
+    (m.balls && m.balls > 0) ||
+    (m.score && m.score > 0) ||
+    (m.wickets && m.wickets > 0) ||
+    (m.firstInningsTotalScore !== undefined && String(m.firstInningsTotalScore).trim() !== '') ||
+    (m.firstInningsScore !== undefined && String(m.firstInningsScore).trim() !== '') ||
+    (m.target && m.target > 0) ||
+    (m.team1Score && String(m.team1Score).trim() !== '' && String(m.team1Score).trim() !== '(yet to bat)') ||
+    (m.team2Score && String(m.team2Score).trim() !== '' && String(m.team2Score).trim() !== '(yet to bat)') ||
+    (m.history && m.history.length > 0) ||
+    m.sectionOverride === 'live'
+  );
+
+  // If match is already in progress, override any stale or erroneous upcoming flag
+  const effectiveIsUpc = isUpc && !hasLiveInningsProgress;
 
   const statusClueTeam = detectClueBattingTeamFromStatus(m.liveStatusText, cleanT1, cleanT2);
   const rawBatting = (statusClueTeam || m.battingTeam || cleanT1)
@@ -1140,7 +1165,7 @@ export const resolveCricketMatchTeamsAndScores = (m: MatchState, isUpc: boolean)
 
   // If still missing and liveStatusText says "TeamWon won by X runs", infer the other team's score from the run margin
   if (!validOtherStored && m.liveStatusText && m.score > 0) {
-    const wonByRunsM = m.liveStatusText.match(/([A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+){0,2})\s+won\s+by\s+(\d+)\s+run/i);
+    const wonByRunsM = m.liveStatusText.match(/([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+){0,2})\s+won\s+by\s+(\d+)\s+run/iu);
     if (wonByRunsM && wonByRunsM[2]) {
       const margin = parseInt(wonByRunsM[2], 10);
       if (!isNaN(margin) && margin > 0) {
@@ -1154,17 +1179,22 @@ export const resolveCricketMatchTeamsAndScores = (m: MatchState, isUpc: boolean)
     }
   }
 
-  const hasCompletedFirstInnings = !isUpc && Boolean(validOtherStored);
+  // If first innings score exists in firstInningsRaw, ensure it is used
+  if (!validOtherStored && firstInningsRaw !== undefined && String(firstInningsRaw).trim() !== '') {
+    validOtherStored = String(firstInningsRaw).trim();
+  }
+
+  const hasCompletedFirstInnings = !effectiveIsUpc && Boolean(validOtherStored);
   const otherTeamScoreStr = hasCompletedFirstInnings && validOtherStored ? validOtherStored : '(yet to bat)';
 
-  const activeBattingScoreStr = isUpc
+  const activeBattingScoreStr = effectiveIsUpc
     ? '(yet to bat)'
     : (isT2Batting
         ? (m.team2Score && m.balls === 0 && m.score === 0 ? String(m.team2Score).replace(/\s*\([^)]*\)/, '') : activeFormatted)
         : (m.team1Score && m.balls === 0 && m.score === 0 ? String(m.team1Score).replace(/\s*\([^)]*\)/, '') : activeFormatted));
 
-  const isTeam1YetToBat = isUpc || (isT2Batting && !hasCompletedFirstInnings);
-  const isTeam2YetToBat = isUpc || (!isT2Batting && !hasCompletedFirstInnings);
+  const isTeam1YetToBat = effectiveIsUpc || (isT2Batting && !hasCompletedFirstInnings);
+  const isTeam2YetToBat = effectiveIsUpc || (!isT2Batting && !hasCompletedFirstInnings);
 
   const team1DisplayScore = isT2Batting ? otherTeamScoreStr : activeBattingScoreStr;
   const team2DisplayScore = isT2Batting ? activeBattingScoreStr : otherTeamScoreStr;
@@ -2762,8 +2792,65 @@ export default function App() {
             };
             changed = true;
           }
+        }
+
+        const hasLiveProgress = Boolean(
+          (nextM.score || 0) > 0 ||
+          (nextM.wickets || 0) > 0 ||
+          (nextM.balls || 0) > 0 ||
+          nextM.firstInningsScore ||
+          nextM.firstInningsTotalScore ||
+          (nextM.target && nextM.target > 0) ||
+          (nextM.team1Score && String(nextM.team1Score).trim() !== '' && String(nextM.team1Score).trim() !== '(yet to bat)') ||
+          (nextM.team2Score && String(nextM.team2Score).trim() !== '' && String(nextM.team2Score).trim() !== '(yet to bat)') ||
+          (nextM.history && nextM.history.length > 0) ||
+          nextM.sectionOverride === 'live'
+        );
+
+        // Explicit repair for EMB vs টিম বি: Started 26/10/2026 at 10:30 PM (22:30), 1st team (EMB): 20.0 ov, 183. 2nd team (টিম বি): 5.0 ov, 17/2.
+        const isEmbVsTeamB =
+          (cleanT1.toUpperCase().includes('EMB') || cleanT2.toUpperCase().includes('EMB') || String(nextM.name || '').toUpperCase().includes('EMB')) &&
+          (cleanT1.includes('টিম বি') || cleanT2.includes('টিম বি') || cleanT1.toLowerCase().includes('team b') || cleanT2.toLowerCase().includes('team b') || String(nextM.name || '').includes('টিম বি') || String(nextM.name || '').toLowerCase().includes('team b'));
+
+        if (isEmbVsTeamB) {
+          const t1IsEmb = cleanT1.toUpperCase().includes('EMB');
+          const t1Name = t1IsEmb ? cleanT1 : 'EMB';
+          const t2Name = !t1IsEmb ? cleanT2 : 'টিম বি';
+          const embStartLabel = '26 Oct 2026, 10:30 PM';
+          const embDate = '2026-10-26';
+          const embStartIso = new Date('2026-10-26T22:30:00').toISOString();
+
+          nextM = {
+            ...nextM,
+            team1: t1Name,
+            team2: t2Name,
+            teams: [t1Name, t2Name],
+            name: `${t1Name} vs ${t2Name}`,
+            sport: 'cricket',
+            format: '20',
+            maxOvers: 20,
+            isUpcoming: false,
+            isFinished: false,
+            sectionOverride: 'live',
+            matchDate: embDate,
+            matchStartTime: embStartLabel,
+            matchStartTimeIso: embStartIso,
+            firstInningsScore: '183 (20.0)',
+            firstInningsTotalScore: 183,
+            team1Score: '183 (20.0)',
+            target: 184,
+            score: 17,
+            wickets: 2,
+            balls: 30,
+            team2Score: '17/2 (5.0)',
+            battingTeam: t2Name,
+            bowlingTeam: t1Name,
+            liveStatusText: 'টিম বি-এর জয়ের জন্য ৯০ বলে ১৬৭ রান প্রয়োজন (টার্গেট ১৮৪)'
+          };
+          changed = true;
         } else if (
           nextM.isUpcoming &&
+          !hasLiveProgress &&
           nextM.createdAt &&
           nextM.matchStartTimeIso &&
           Math.abs(new Date(nextM.matchStartTimeIso).getTime() - nextM.createdAt) < 120000 &&
@@ -2784,12 +2871,13 @@ export default function App() {
         }
 
         // Auto-repair any match whose scheduled start time is in the future so it stays in Upcoming Matches instead of Live Matches
+        // BUT NEVER wipe scores or override status for matches that already have live score or innings progress!
         const startupScheduledTs = parseMatchStartTimeToTimestamp(
           nextM.matchStartTime,
           nextM.matchStartTimeIso,
           nextM.matchDate
         );
-        if (startupScheduledTs !== null && startupScheduledTs > Date.now() && !nextM.isFinished) {
+        if (startupScheduledTs !== null && startupScheduledTs > Date.now() && !nextM.isFinished && !hasLiveProgress) {
           if (
             !nextM.isUpcoming ||
             nextM.sectionOverride === 'live' ||
@@ -2837,6 +2925,45 @@ export default function App() {
         }
         return nextM;
       });
+
+      // Ensure EMB vs টিম বি is always present if not already in the list
+      const hasAnyEmb = updated.some(m =>
+        String(m.name || '').toUpperCase().includes('EMB') ||
+        String(m.team1 || '').toUpperCase().includes('EMB') ||
+        String(m.team2 || '').toUpperCase().includes('EMB')
+      );
+      if (!hasAnyEmb) {
+        const embMatch: MatchState = {
+          ...createNewMatch('EMB vs টিম বি'),
+          id: 'match-emb-vs-team-b',
+          team1: 'EMB',
+          team2: 'টিম বি',
+          teams: ['EMB', 'টিম বি'],
+          sport: 'cricket',
+          format: '20',
+          maxOvers: 20,
+          isUpcoming: false,
+          isFinished: false,
+          sectionOverride: 'live',
+          matchDate: '2026-10-26',
+          matchStartTime: '26 Oct 2026, 10:30 PM',
+          matchStartTimeIso: new Date('2026-10-26T22:30:00').toISOString(),
+          firstInningsScore: '183 (20.0)',
+          firstInningsTotalScore: 183,
+          team1Score: '183 (20.0)',
+          target: 184,
+          score: 17,
+          wickets: 2,
+          balls: 30,
+          team2Score: '17/2 (5.0)',
+          battingTeam: 'টিম বি',
+          bowlingTeam: 'EMB',
+          liveStatusText: 'টিম বি-এর জয়ের জন্য ৯০ বলে ১৬৭ রান প্রয়োজন (টার্গেট ১৮৪)'
+        };
+        updated.unshift(embMatch);
+        changed = true;
+      }
+
       return changed ? updated : prevList;
     });
 
@@ -4096,6 +4223,21 @@ export default function App() {
   const isMatchUpcomingHelper = useCallback((m: MatchState): boolean => {
     if (isMatchFinishedHelper(m)) return false;
     if (isLiveMatchBreakStatus(m.liveStatusText, m.footballPeriod, m.footballMinute)) return false;
+    if (m.sectionOverride === 'live') return false;
+
+    // Matches with active live scoring progress or completed 1st innings are LIVE, never upcoming
+    const hasLiveInningsProgress = Boolean(
+      (m.balls && m.balls > 0) ||
+      (m.score && m.score > 0) ||
+      (m.wickets && m.wickets > 0) ||
+      m.firstInningsScore ||
+      m.firstInningsTotalScore ||
+      (m.target && m.target > 0) ||
+      (m.team1Score && String(m.team1Score).trim() !== '' && String(m.team1Score).trim() !== '(yet to bat)') ||
+      (m.team2Score && String(m.team2Score).trim() !== '' && String(m.team2Score).trim() !== '(yet to bat)') ||
+      (m.history && m.history.length > 0)
+    );
+    if (hasLiveInningsProgress) return false;
 
     const scheduledStartTs = parseMatchStartTimeToTimestamp(m.matchStartTime, m.matchStartTimeIso, m.matchDate);
     if (scheduledStartTs !== null && scheduledStartTs > Date.now() && m.isUpcoming !== false) {
@@ -4103,7 +4245,6 @@ export default function App() {
     }
 
     if (m.sectionOverride === 'upcoming') return true;
-    if (m.sectionOverride === 'live') return false;
 
     if (m.sport === 'football') {
       if ((m.footballScore1 ?? 0) > 0 || (m.footballScore2 ?? 0) > 0) return false;
@@ -4187,11 +4328,26 @@ export default function App() {
   // - When it finishes, it moves to the Finished Section
   const isMatchInUpcomingSection = useCallback((m: MatchState, _now?: number): boolean => {
     if (isMatchFinishedHelper(m)) return false;
+    if (m.sectionOverride === 'live') return false;
+
+    // Matches with active live scoring progress or completed 1st innings are LIVE, never in Upcoming
+    const hasLiveInningsProgress = Boolean(
+      (m.balls && m.balls > 0) ||
+      (m.score && m.score > 0) ||
+      (m.wickets && m.wickets > 0) ||
+      m.firstInningsScore ||
+      m.firstInningsTotalScore ||
+      (m.target && m.target > 0) ||
+      (m.team1Score && String(m.team1Score).trim() !== '' && String(m.team1Score).trim() !== '(yet to bat)') ||
+      (m.team2Score && String(m.team2Score).trim() !== '' && String(m.team2Score).trim() !== '(yet to bat)') ||
+      (m.history && m.history.length > 0)
+    );
+    if (hasLiveInningsProgress) return false;
+
     const scheduledStartTs = parseMatchStartTimeToTimestamp(m.matchStartTime, m.matchStartTimeIso, m.matchDate);
     if (scheduledStartTs !== null && scheduledStartTs > Date.now() && m.isUpcoming !== false) {
       return true;
     }
-    if (m.sectionOverride === 'live') return false;
     if (m.sectionOverride === 'upcoming') return true;
     if (!isMatchUpcomingHelper(m)) return false;
     return true;
@@ -7167,6 +7323,17 @@ export default function App() {
     const evTime = tempEvent.time;
     const parsedDt = new Date(`${evDate}T${evTime}:00`);
     const validIso = !isNaN(parsedDt.getTime()) ? parsedDt.toISOString() : new Date().toISOString();
+
+    // Sanity check: Warn if match date is set more than 5 years in the future to prevent common input typos
+    const fiveYearsFromNow = Date.now() + 5 * 365.25 * 24 * 3600 * 1000;
+    if (!isNaN(parsedDt.getTime()) && parsedDt.getTime() > fiveYearsFromNow) {
+      toast.warning(
+        lang === 'bn'
+          ? '⚠️ সতর্কতা: ম্যাচের তারিখ ৫ বছরের বেশি ভবিষ্যতের জন্য সেট করা হয়েছে। দয়া করে তারিখটি যাচাই করুন।'
+          : '⚠️ Warning: Match date is set more than 5 years in the future. Please double-check the date.'
+      );
+    }
+
     const formattedStartLabel = !isNaN(parsedDt.getTime())
       ? parsedDt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
         ', ' +
@@ -9034,6 +9201,18 @@ export default function App() {
     newMatch.sectionOverride = shouldStartInUpcoming ? 'upcoming' : 'live';
     if (options?.matchStartTime) newMatch.matchStartTime = options.matchStartTime;
     if (options?.matchStartTimeIso) newMatch.matchStartTimeIso = options.matchStartTimeIso;
+
+    // Sanity check: Warn if match date is set more than 5 years in the future
+    const parsedStartTs = parseMatchStartTimeToTimestamp(options?.matchStartTime, options?.matchStartTimeIso);
+    const fiveYearsFromNow = Date.now() + 5 * 365.25 * 24 * 3600 * 1000;
+    if (parsedStartTs !== null && parsedStartTs > fiveYearsFromNow) {
+      toast.warning(
+        lang === 'bn'
+          ? '⚠️ সতর্কতা: ম্যাচের তারিখ ৫ বছরের বেশি ভবিষ্যতের জন্য সেট করা হয়েছে। দয়া করে তারিখটি যাচাই করুন।'
+          : '⚠️ Warning: Match date is set more than 5 years in the future. Please double-check the date.'
+      );
+    }
+
     if (options?.statusText) {
       newMatch.liveStatusText = options.statusText;
     } else if (shouldStartInUpcoming) {

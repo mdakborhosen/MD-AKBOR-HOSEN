@@ -40,6 +40,7 @@ interface CricketMatchArenaProps {
   scoreFlicker?: boolean;
   onOpenEditTeams: () => void;
   onOpenLiveModal: () => void;
+  onFetchLive?: (url?: string, isManual?: boolean) => void;
   onOpenStartTimeEditor?: () => void;
   onOpenTargetManager: (focus?: 'over' | 'target' | 'multiple') => void;
   onShareResult: (m: MatchState) => void;
@@ -83,6 +84,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
   scoreFlicker,
   onOpenEditTeams,
   onOpenLiveModal,
+  onFetchLive,
   onOpenStartTimeEditor,
   onOpenTargetManager,
   onShareResult,
@@ -1563,7 +1565,13 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
             )}
             <button
               type="button"
-              onClick={onOpenLiveModal}
+              onClick={() => {
+                if (match.liveMatchUrl && onFetchLive) {
+                  onFetchLive(match.liveMatchUrl, true);
+                } else {
+                  onOpenLiveModal();
+                }
+              }}
               className="px-2 py-0.5 rounded-xl bg-white/10 hover:bg-white/15 text-[11px] font-bold text-cyan-300 flex items-center gap-1 border border-white/10 cursor-pointer transition-all"
               title={lang === 'bn' ? 'লাইভ লিংক সিঙ্ক' : 'Live Link Sync'}
             >

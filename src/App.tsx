@@ -5701,10 +5701,17 @@ export default function App() {
           const fbDurationMs = 125 * 60 * 1000;
           let isUpc = false;
           let isFbFin = false;
+          const matchHasLocalFbProgress = Boolean(
+            (prev.footballScore1 ?? 0) > 0 ||
+            (prev.footballScore2 ?? 0) > 0 ||
+            (prev.footballMinute && !/^(?:upcoming|not\s*started)$/i.test(String(prev.footballMinute).trim())) ||
+            prev.sectionOverride === 'live' ||
+            (Array.isArray(prev.footballGoals) && prev.footballGoals.length > 0)
+          );
           if (live.isFallback) {
             if (fbScheduledTs !== null) {
               if (fbScheduledTs > fbNow) {
-                isUpc = true;
+                isUpc = !matchHasLocalFbProgress;
                 isFbFin = false;
               } else if (fbNow - fbScheduledTs <= fbDurationMs && !prev.isFinished) {
                 isUpc = false;
@@ -5714,7 +5721,7 @@ export default function App() {
                 isFbFin = true;
               }
             } else {
-              isUpc = Boolean(prev.isUpcoming);
+              isUpc = matchHasLocalFbProgress ? false : Boolean(prev.isUpcoming);
               isFbFin = Boolean(prev.isFinished);
             }
           } else {
@@ -5727,7 +5734,7 @@ export default function App() {
               live.isFinished ||
               (!hasActiveFbClock && !live.isUpcoming && fbScheduledTs !== null && fbNow - fbScheduledTs > fbDurationMs)
             );
-            isUpc = !onFbBreak && !isFbFin && (
+            isUpc = !onFbBreak && !isFbFin && !matchHasLocalFbProgress && (
               Boolean(live.isUpcoming) ||
               (!hasActiveFbClock && isFbScheduledFuture && Number(live.footballScore1 || 0) === 0 && Number(live.footballScore2 || 0) === 0)
             );
@@ -5735,7 +5742,6 @@ export default function App() {
           const isAuthoritative =
             !live.isFallback &&
             Boolean(live.team1 && live.team2 && !isGenericPlaceholder(live.team1) && !isGenericPlaceholder(live.team2));
-
           next.sport = 'football';
           next.liveMatchUrl = targetUrl;
           next.liveSyncEnabled = isManual ? true : next.liveSyncEnabled;
@@ -5746,7 +5752,7 @@ export default function App() {
           next.finishedAt = isFbFin ? (prev.finishedAt || Date.now()) : undefined;
           if (isFbFin) {
             next.sectionOverride = 'finished';
-          } else if (onFbBreak || !isUpc) {
+          } else if (onFbBreak || !isUpc || matchHasLocalFbProgress) {
             next.sectionOverride = 'live';
           } else if (isUpc) {
             next.sectionOverride = 'upcoming';
@@ -5825,9 +5831,9 @@ export default function App() {
           next.teams = [finalT1, finalT2];
           next.battingTeam = finalT1;
           next.bowlingTeam = finalT2;
-          next.footballScore1 = isUpc ? 0 : (mappedFbScore1 !== undefined ? mappedFbScore1 : (next.footballScore1 ?? 0));
-          next.footballScore2 = isUpc ? 0 : (mappedFbScore2 !== undefined ? mappedFbScore2 : (next.footballScore2 ?? 0));
-          if (isUpc) {
+          next.footballScore1 = (isUpc && !matchHasLocalFbProgress) ? 0 : (mappedFbScore1 !== undefined ? mappedFbScore1 : (next.footballScore1 ?? 0));
+          next.footballScore2 = (isUpc && !matchHasLocalFbProgress) ? 0 : (mappedFbScore2 !== undefined ? mappedFbScore2 : (next.footballScore2 ?? 0));
+          if (isUpc && !matchHasLocalFbProgress) {
             next.footballMinute = 'Upcoming';
             next.footballPeriod = 'Not started';
             next.footballGoals = [];
@@ -5954,9 +5960,21 @@ export default function App() {
           String(live.statusText || next.liveStatusText || '').includes('🏆')
         );
 
+        const matchHasLocalCrkProgress = Boolean(
+          (prev.balls && prev.balls > 0) ||
+          (prev.score && prev.score > 0) ||
+          (prev.wickets && prev.wickets > 0) ||
+          (prev.firstInningsTotalScore !== undefined && String(prev.firstInningsTotalScore).trim() !== '') ||
+          (prev.firstInningsScore !== undefined && String(prev.firstInningsScore).trim() !== '') ||
+          (prev.target && prev.target > 0) ||
+          prev.sectionOverride === 'live' ||
+          wasCrkAlreadyLive
+        );
+
         const isUpcNow = Boolean(
           !isFinNow &&
-          !onCrkBreak && (
+          !onCrkBreak &&
+          !matchHasLocalCrkProgress && (
             serverSaysUpcoming ||
             (isCrkScheduledFuture && !hasServerLiveProgress) ||
             (!wasCrkAlreadyLive &&
@@ -5968,10 +5986,10 @@ export default function App() {
 
         next.isFinished = isFinNow ? true : (onCrkBreak || isUpcNow ? false : prev.isFinished);
         next.finishedAt = isFinNow ? (prev.finishedAt || Date.now()) : (onCrkBreak || isUpcNow ? undefined : prev.finishedAt);
-        next.isUpcoming = isFinNow || onCrkBreak ? false : isUpcNow;
+        next.isUpcoming = isFinNow || onCrkBreak || matchHasLocalCrkProgress ? false : isUpcNow;
         if (isFinNow) {
           next.sectionOverride = 'finished';
-        } else if (onCrkBreak || !isUpcNow) {
+        } else if (onCrkBreak || !isUpcNow || matchHasLocalCrkProgress) {
           next.sectionOverride = 'live';
         } else if (isUpcNow) {
           next.sectionOverride = 'upcoming';
@@ -6020,7 +6038,7 @@ export default function App() {
         const isLiveBatT2 = areCricketTeamsSame(rawLiveBat, next.team2) && !areCricketTeamsSame(rawLiveBat, next.team1);
         next.battingTeam = isLiveBatT2 ? next.team2 : next.team1;
         next.bowlingTeam = isLiveBatT2 ? next.team1 : next.team2;
-        if (isUpcNow) {
+        if (isUpcNow && !matchHasLocalCrkProgress) {
           next.score = 0;
           next.wickets = 0;
           next.balls = 0;
@@ -6037,9 +6055,9 @@ export default function App() {
           next.team1BowlingStats = undefined;
           next.team2BowlingStats = undefined;
         } else {
-          if (live.score !== undefined) next.score = live.score;
-          if (live.wickets !== undefined) next.wickets = Math.min(10, live.wickets);
-          if (live.totalBalls !== undefined) next.balls = live.totalBalls;
+          if (live.score !== undefined && (!isUpcNow || live.score > 0)) next.score = live.score;
+          if (live.wickets !== undefined && (!isUpcNow || live.wickets > 0)) next.wickets = Math.min(10, live.wickets);
+          if (live.totalBalls !== undefined && (!isUpcNow || live.totalBalls > 0)) next.balls = live.totalBalls;
         }
         const finalT1 = next.team1 || 'Team 1';
         const finalT2 = next.team2 || 'Team 2';
@@ -6060,15 +6078,18 @@ export default function App() {
           if (!keepCustomTargetOnSync || !prev.target) {
             next.target = live.target;
           }
-        } else if (isLiveFirstInnings || !keepCustomTargetOnSync) {
-          next.target = undefined;
+        } else if ((isLiveFirstInnings && !matchHasLocalCrkProgress) || !keepCustomTargetOnSync) {
+          if (!matchHasLocalCrkProgress) next.target = undefined;
         }
 
-        if (!isUpcNow) {
+        if (!isUpcNow || matchHasLocalCrkProgress) {
           if (live.firstInningsScore !== undefined && live.firstInningsScore !== null && String(live.firstInningsScore).trim() !== '') {
             next.firstInningsScore = live.firstInningsScore;
             next.firstInningsTotalScore = live.firstInningsScore;
-          } else if (isLiveFirstInnings) {
+          } else if (prev.firstInningsScore !== undefined && String(prev.firstInningsScore).trim() !== '') {
+            next.firstInningsScore = prev.firstInningsScore;
+            next.firstInningsTotalScore = prev.firstInningsTotalScore || prev.firstInningsScore;
+          } else if (isLiveFirstInnings && !matchHasLocalCrkProgress) {
             // 1st innings in progress: clear any stale 1st innings total score
             next.firstInningsScore = undefined;
             next.firstInningsTotalScore = undefined;
@@ -7011,7 +7032,7 @@ export default function App() {
 
       return candidates.filter(m =>
         Boolean(
-          (m.liveMatchUrl && m.liveMatchUrl.trim() && (m.liveSyncEnabled || isMatchInUpcomingSectionRef.current(m) || linkedMatchIds.has(m.id))) ||
+          (m.liveMatchUrl && m.liveMatchUrl.trim() && (m.liveSyncEnabled !== false || isMatchInUpcomingSectionRef.current(m) || linkedMatchIds.has(m.id))) ||
           (m.sport === 'football' && !isMatchFinishedHelperRef.current(m) && (m.liveMatchUrl || (m.team1 && m.team2)))
         )
       );
@@ -13585,6 +13606,7 @@ export default function App() {
                               scoreFlicker={scoreFlicker}
                               onOpenEditTeams={() => setIsEditingTeams(true)}
                               onOpenLiveModal={() => setIsLiveMatchModalOpen(true)}
+                              onFetchLive={fetchLiveMatchData}
                               onOpenStartTimeEditor={() => setIsStartTimeEditorOpen(true)}
                               onOpenTargetManager={(focus) => {
                                 if (focus) setTargetManagerInitialFocus(focus);

@@ -89,6 +89,7 @@ import {
   Cloud,
   CloudUpload,
   CloudDownload,
+  CloudLightning,
   Newspaper,
   BookOpen,
   Tag,
@@ -130,6 +131,9 @@ import { SavedSlipCard, BetEvent, BetRuleType, EventStatus } from './types/betsl
 import { BallNumberWordLogo } from './components/BallNumberWordLogo';
 import { GoogleCalendarModal } from './components/GoogleCalendarModal';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
+import { PagesDevSyncModal } from './components/PagesDevSyncModal';
+import { decodeSyncBundle } from './lib/syncExportImport';
+import { fetchLiveMatchDirectClient } from './lib/clientLiveMatchSync';
 import { CricketAppStateBackup, uploadBackupToGoogleDrive, getDailyBackupFileName, getTodayDateKey } from './lib/googleDrive';
 import { getCachedAccessToken, signInWithGoogle } from './lib/googleCalendar';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -5047,6 +5051,58 @@ export default function App() {
   const [isShowingTournaments, setIsShowingTournaments] = createSubPageStateTuple('tournaments');
   const [isGoogleCalendarModalOpen, setIsGoogleCalendarModalOpen] = createSubPageStateTuple('calendar');
   const [isGoogleDriveModalOpen, setIsGoogleDriveModalOpen] = createSubPageStateTuple('drive');
+  const [isPagesDevSyncOpen, setIsPagesDevSyncOpen] = useState(false);
+
+  const handleImportBundle = useCallback((bundle: { matches: MatchState[]; currentMatchId?: string; savedSlipCards?: any[] }) => {
+    if (bundle && Array.isArray(bundle.matches) && bundle.matches.length > 0) {
+      setMatches(bundle.matches);
+      matchesRef.current = bundle.matches;
+      try {
+        localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(bundle.matches));
+      } catch {}
+      const targetId = bundle.currentMatchId || bundle.matches[0]?.id || '';
+      if (targetId) {
+        setCurrentMatchId(targetId);
+        currentMatchIdRef.current = targetId;
+        try {
+          localStorage.setItem(STORAGE_KEY_CURRENT_ID, targetId);
+        } catch {}
+      }
+      if (Array.isArray(bundle.savedSlipCards)) {
+        setSavedSlipCards(bundle.savedSlipCards);
+        savedSlipCardsRef.current = bundle.savedSlipCards;
+        try {
+          localStorage.setItem('cricket-saved-slip-cards', JSON.stringify(bundle.savedSlipCards));
+        } catch {}
+      }
+    }
+  }, []);
+
+  // Automatic Cross-Domain Sync Detection from URL hash #sync=
+  useEffect(() => {
+    try {
+      const rawHash = window.location.hash || '';
+      if (rawHash.includes('sync=')) {
+        const token = rawHash.split('sync=')[1].split('&')[0];
+        if (token) {
+          const decoded = decodeSyncBundle(token);
+          if (decoded && Array.isArray(decoded.matches) && decoded.matches.length > 0) {
+            handleImportBundle(decoded);
+            toast.success(
+              lang === 'bn'
+                ? `✅ সফলভাবে AI Studio থেকে ${decoded.matches.length}টি ম্যাচ Pages.dev-এ সিঙ্ক হয়েছে!`
+                : `✅ Successfully synced ${decoded.matches.length} matches to Pages.dev!`
+            );
+            try {
+              window.history.replaceState(null, '', window.location.pathname + '#scorer');
+            } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to auto-process sync hash:', e);
+    }
+  }, [handleImportBundle, lang]);
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [notesInput, setNotesInput] = useState("");
   const [isLinksModalOpen, setIsLinksModalOpen] = createSubPageStateTuple('links');
@@ -5410,6 +5466,17 @@ export default function App() {
         statusText: curMatch.liveStatusText || `${finalT1} vs ${finalT2}`,
         lastUpdated: new Date().toLocaleTimeString()
       };
+    }
+
+    // Client-side direct live fetch via CORS proxy (essential for static Cloudflare Pages / pages.dev)
+    if (/^https?:\/\//i.test(targetUrl)) {
+      try {
+        const directClientData = await fetchLiveMatchDirectClient(targetUrl, finalT1, finalT2, 'cricket');
+        if (directClientData) {
+          clientLiveCacheRef.current.set(targetUrl, { time: Date.now(), data: directClientData });
+          return directClientData;
+        }
+      } catch {}
     }
 
     const overs = Math.floor((curMatch.balls || 0) / 6);
@@ -7121,6 +7188,23 @@ export default function App() {
                   preloadedLive: liveData
                 });
               }
+            }
+          } else if (!res.ok) {
+            // Static hosting fallback (e.g. Cloudflare Pages md-akbor-hosen.pages.dev)
+            for (const item of batchPayload.slice(0, 3)) {
+              if (!isMounted) break;
+              try {
+                const directLive = await fetchLiveMatchDirectClient(item.url, item.team1, item.team2, item.sport as any);
+                if (directLive && isMounted) {
+                  await fetchLiveMatchDataRef.current(item.url, false, {
+                    id: item.id,
+                    team1: item.team1,
+                    team2: item.team2,
+                    sport: (item.sport === 'football' ? 'football' : 'cricket'),
+                    preloadedLive: directLive
+                  });
+                }
+              } catch {}
             }
           }
         } catch {
@@ -11321,6 +11405,16 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => setIsPagesDevSyncOpen(true)}
+              className="px-2 py-1 rounded-lg border border-cyan-500/50 bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-sm shadow-cyan-950"
+              title={lang === 'bn' ? 'Pages.dev এ সিঙ্ক ও ট্রান্সফার' : 'Sync & Transfer to Pages.dev'}
+            >
+              <CloudLightning size={11} className="text-cyan-400" />
+              <span>{lang === 'bn' ? 'Pages.dev সিঙ্ক' : 'Pages.dev Sync'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsFocusMode(prev => !prev)}
               className={cn(
                 "px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer",
@@ -11454,6 +11548,14 @@ export default function App() {
               >
                 <Cloud size={13} className="text-blue-400 shrink-0" />
                 <span className="truncate">{lang === 'bn' ? 'ড্রাইভ ব্যাকআপ' : 'Drive Backup'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsPagesDevSyncOpen(true); setIsUnifiedMenuOpen(false); }}
+                className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <CloudLightning size={13} className="text-cyan-400 shrink-0" />
+                <span className="truncate">{lang === 'bn' ? 'Pages.dev সিঙ্ক' : 'Pages.dev Sync'}</span>
               </button>
               <button
                 type="button"
@@ -14271,6 +14373,19 @@ export default function App() {
                                 >
                                   <Cloud size={10} />
                                   <span>{lang === 'bn' ? 'ড্রাইভ ব্যাকআপ' : 'Drive Backup'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsPagesDevSyncOpen(true)}
+                                  className="px-2 py-0.5 rounded-md bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-400/40 text-[9px] font-black inline-flex items-center gap-1 cursor-pointer transition-all"
+                                  title={
+                                    lang === 'bn'
+                                      ? 'Pages.dev এ ম্যাচ ও ডাটা সিঙ্ক করুন'
+                                      : 'Sync Matches & Data to Pages.dev'
+                                  }
+                                >
+                                  <CloudLightning size={10} className="text-cyan-400" />
+                                  <span>{lang === 'bn' ? 'Pages.dev সিঙ্ক' : 'Pages.dev Sync'}</span>
                                 </button>
                               </div>
                             )}
@@ -20654,6 +20769,17 @@ export default function App() {
             silent: false,
           })
         }
+      />
+
+      {/* Pages.dev Sync & Transfer Modal */}
+      <PagesDevSyncModal
+        isOpen={isPagesDevSyncOpen}
+        onClose={() => setIsPagesDevSyncOpen(false)}
+        matches={matches}
+        currentMatchId={currentMatchId}
+        savedSlipCards={savedSlipCards}
+        onImportBundle={handleImportBundle}
+        lang={lang}
       />
 
       {/* User & Admin Links Modal */}

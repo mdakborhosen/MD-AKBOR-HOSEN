@@ -133,6 +133,7 @@ import { GoogleCalendarModal } from './components/GoogleCalendarModal';
 import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { PagesDevSyncModal } from './components/PagesDevSyncModal';
 import { decodeSyncBundle } from './lib/syncExportImport';
+import { ExternalLinkPopupModal } from './components/ExternalLinkPopupModal';
 import { fetchLiveMatchDirectClient } from './lib/clientLiveMatchSync';
 import { CricketAppStateBackup, uploadBackupToGoogleDrive, getDailyBackupFileName, getTodayDateKey } from './lib/googleDrive';
 import { getCachedAccessToken, signInWithGoogle } from './lib/googleCalendar';
@@ -1646,6 +1647,50 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('cricket-lang', lang);
   }, [lang]);
+
+  // In-app Popup Modal for External Links (opens all external links in existing tab rather than creating a new tab)
+  const [externalPopupUrl, setExternalPopupUrl] = useState<string | null>(null);
+  const [externalPopupTitle, setExternalPopupTitle] = useState<string | undefined>(undefined);
+
+  const openExternalPopup = useCallback((url: string, title?: string) => {
+    if (!url) return;
+    setExternalPopupUrl(url);
+    if (title) setExternalPopupTitle(title);
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalAnchorClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement)?.closest('a');
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      if (/^https?:\/\//i.test(href)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setExternalPopupUrl(href);
+        const linkTitle = anchor.getAttribute('title') || anchor.innerText?.trim() || 'External Page';
+        setExternalPopupTitle(linkTitle.slice(0, 40));
+      }
+    };
+    document.addEventListener('click', handleGlobalAnchorClick, true);
+    return () => document.removeEventListener('click', handleGlobalAnchorClick, true);
+  }, []);
+
+  useEffect(() => {
+    const originalOpen = window.open;
+    window.open = (url?: string | URL, target?: string, features?: string): Window | null => {
+      const urlStr = typeof url === 'string' ? url : (url instanceof URL ? url.toString() : '');
+      if (urlStr && /^https?:\/\//i.test(urlStr)) {
+        openExternalPopup(urlStr, 'External Link');
+        return null;
+      }
+      return originalOpen.call(window, url as any, target, features);
+    };
+    return () => {
+      window.open = originalOpen;
+    };
+  }, [openExternalPopup]);
 
   const [newPlayerName1, setNewPlayerName1] = useState("");
   const [newPlayerName2, setNewPlayerName2] = useState("");
@@ -6239,21 +6284,62 @@ export default function App() {
           }
           next.onStrikeIdx = fallbackStrike;
         }
+        // Safely extract liveBowler & liveBowlerStats without [object Object]
         if (live.bowler) {
-          next.liveBowler = String(live.bowler);
+          const rawB = live.bowler;
+          const cleanBName = typeof rawB === 'string'
+            ? (rawB.trim() === '[object Object]' ? '' : rawB.trim())
+            : (typeof rawB === 'object' && rawB ? String(rawB.name || rawB.title || '').trim() : '');
+          if (cleanBName && cleanBName !== '[object Object]') {
+            next.liveBowler = cleanBName;
+          }
         }
         if (live.liveBowlerStats && typeof live.liveBowlerStats === 'object') {
-          next.liveBowlerStats = live.liveBowlerStats;
+          const statsObj = live.liveBowlerStats;
+          const bwName = (typeof statsObj.name === 'string' && statsObj.name.trim() !== '[object Object]')
+            ? statsObj.name.trim()
+            : (next.liveBowler || '');
+          next.liveBowlerStats = {
+            ...statsObj,
+            name: bwName
+          };
+          if (bwName && bwName !== '[object Object]') next.liveBowler = bwName;
         }
         if (live.liveBallEvent) {
-          next.liveBallEvent = String(live.liveBallEvent);
+          const evRaw = live.liveBallEvent;
+          const cleanEv = typeof evRaw === 'string'
+            ? (evRaw.trim() === '[object Object]' ? '' : evRaw.trim())
+            : (typeof evRaw === 'object' && evRaw ? String(evRaw.name || evRaw.u || evRaw.symbol || '').trim() : '');
+          if (cleanEv && cleanEv !== '[object Object]') {
+            next.liveBallEvent = cleanEv;
+          }
+        }
+
+        // Sanitize incoming live.recentBalls array
+        const sanitizedIncomingBalls: string[] = Array.isArray(live.recentBalls)
+          ? live.recentBalls
+              .map((item: any) => {
+                if (item === null || item === undefined) return '';
+                if (typeof item === 'string') return item.trim() === '[object Object]' ? '' : item.trim();
+                if (typeof item === 'number') return String(item);
+                if (typeof item === 'object') {
+                  const s = item.u || item.b || item.val || item.runs || item.symbol || item.text;
+                  return s ? String(s).trim() : '';
+                }
+                return '';
+              })
+              .filter((s: string) => s && s !== '[object Object]')
+          : [];
+
+        if (sanitizedIncomingBalls.length > 0) {
+          next.liveRecentBalls = sanitizedIncomingBalls;
         }
 
         // Detect latest ball symbol from live feed (0, 1, 2, 3, 4, 5, 6, W, WD, NB, LEG BYE, BYE)
         const scoreDelta = (typeof live.score === 'number' && typeof prev.score === 'number') ? (live.score - prev.score) : 0;
         const wicketDelta = (typeof live.wickets === 'number' && typeof prev.wickets === 'number') ? (live.wickets - prev.wickets) : 0;
 
-        let latestBallSymbol: string | null = live.lastBallSymbol || null;
+        let latestBallSymbol: string | null = (live.lastBallSymbol && String(live.lastBallSymbol) !== '[object Object]') ? String(live.lastBallSymbol) : null;
 
         // If not explicitly provided, deduce from score change or recent balls
         if (!latestBallSymbol) {
@@ -6263,9 +6349,9 @@ export default function App() {
             latestBallSymbol = '4';
           } else if (wicketDelta > 0) {
             latestBallSymbol = 'W';
-          } else if (Array.isArray(live.recentBalls) && live.recentBalls.length > 0) {
-            const firstBall = live.recentBalls[0];
-            const lastBall = live.recentBalls[live.recentBalls.length - 1];
+          } else if (sanitizedIncomingBalls.length > 0) {
+            const firstBall = sanitizedIncomingBalls[0];
+            const lastBall = sanitizedIncomingBalls[sanitizedIncomingBalls.length - 1];
             if (scoreDelta === 6 && (firstBall === '6' || lastBall === '6')) {
               latestBallSymbol = '6';
             } else if (scoreDelta === 4 && (firstBall === '4' || lastBall === '4')) {
@@ -6275,6 +6361,8 @@ export default function App() {
             }
           }
         }
+
+        if (latestBallSymbol === '[object Object]') latestBallSymbol = null;
 
         const prevBallSymbol = prev.liveRecentBalls && prev.liveRecentBalls.length > 0 ? prev.liveRecentBalls[prev.liveRecentBalls.length - 1] : null;
 
@@ -22372,6 +22460,15 @@ export default function App() {
         onQuickDeleteMatch={deleteMatch}
         onQuickAddMilestone={handleQuickAddMilestone}
         onQuickDeleteMilestone={handleQuickDeleteMilestone}
+      />
+
+      {/* In-app External Link Popup Modal (opens all external links inside existing tab) */}
+      <ExternalLinkPopupModal
+        isOpen={Boolean(externalPopupUrl)}
+        onClose={() => setExternalPopupUrl(null)}
+        url={externalPopupUrl || ''}
+        title={externalPopupTitle}
+        lang={lang}
       />
     </div>
   );

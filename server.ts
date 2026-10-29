@@ -3052,7 +3052,8 @@ async function parseLiveCricketUrlCore(
         { name: `${team1Name} Batter 1`, runs: Math.max(12, Math.floor(nextScore * 0.42)), balls: Math.max(10, Math.floor(nextBalls * 0.45)), fours: 4, sixes: 2 },
         { name: `${team1Name} Batter 2`, runs: Math.max(8, Math.floor(nextScore * 0.28)), balls: Math.max(8, Math.floor(nextBalls * 0.32)), fours: 3, sixes: 1 }
       ],
-      bowler: { name: `${team2Name} Bowler`, overs: `${Math.min(3, nextOvers)}.${nextBallsInOver}`, runs: 26, wickets: Math.min(2, nextWickets) },
+      bowler: `${team2Name} Bowler`,
+      liveBowlerStats: { name: `${team2Name} Bowler`, overs: `${Math.min(3, nextOvers)}.${nextBallsInOver}`, runs: 26, wickets: Math.min(2, nextWickets) },
       isUpcoming: isUpcUrl,
       lastUpdated: new Date().toLocaleTimeString()
     };

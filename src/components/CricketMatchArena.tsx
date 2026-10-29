@@ -1054,18 +1054,42 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
   const strikerSR = strikerBatter.balls > 0 ? ((strikerBatter.runs / strikerBatter.balls) * 100).toFixed(1) : '0.0';
   const nonStrikerSR = nonStrikerBatter.balls > 0 ? ((nonStrikerBatter.runs / nonStrikerBatter.balls) * 100).toFixed(1) : '0.0';
 
-  const activeBowlerStats = match.liveBowlerStats || {
-    name: match.liveBowler || activeBowlingTeamData.players[0]?.name || (lang === 'bn' ? 'বোলার' : 'Bowler'),
-    wickets: isUpcomingMatch ? 0 : (match.wickets ?? 0),
-    runs: isUpcomingMatch ? 0 : (match.score ?? 0),
-    overs: isUpcomingMatch ? '0.0' : oversDisplay,
-    maidens: 0,
-    economy: isUpcomingMatch ? '0.00' : runRate
+  const safeStr = (val: any, fallback = ''): string => {
+    if (val === null || val === undefined) return fallback;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (trimmed === '[object Object]' || trimmed.includes('[object Object]')) return fallback;
+      return trimmed;
+    }
+    if (typeof val === 'number') return String(val);
+    if (typeof val === 'object') {
+      const candidate = val.name ?? val.u ?? val.b ?? val.val ?? val.runs ?? val.symbol ?? val.text;
+      if (candidate !== undefined && candidate !== null && typeof candidate !== 'object') {
+        const s = String(candidate).trim();
+        if (s && s !== '[object Object]') return s;
+      }
+      return fallback;
+    }
+    return fallback;
   };
 
-  const formatBallSymbolToCallout = (sym?: string): string => {
-    const s = (sym || '').trim();
-    if (!s) return '';
+  const rawBowlerCandidate = safeStr(match.liveBowlerStats?.name) || safeStr(match.liveBowler) || safeStr(activeBowlingTeamData.players[0]?.name) || (lang === 'bn' ? 'বোলার' : 'Bowler');
+  const cleanBowlerName = (!rawBowlerCandidate || rawBowlerCandidate === '[object Object]')
+    ? (lang === 'bn' ? 'বোলার' : 'Bowler')
+    : rawBowlerCandidate;
+
+  const activeBowlerStats = {
+    name: cleanBowlerName,
+    wickets: isUpcomingMatch ? 0 : (match.liveBowlerStats?.wickets ?? match.wickets ?? 0),
+    runs: isUpcomingMatch ? 0 : (match.liveBowlerStats?.runs ?? match.score ?? 0),
+    overs: isUpcomingMatch ? '0.0' : (safeStr(match.liveBowlerStats?.overs) || oversDisplay),
+    maidens: match.liveBowlerStats?.maidens ?? 0,
+    economy: isUpcomingMatch ? '0.00' : (safeStr(match.liveBowlerStats?.economy) || runRate)
+  };
+
+  const formatBallSymbolToCallout = (sym?: any): string => {
+    const s = safeStr(sym);
+    if (!s || s === '[object Object]') return '';
     if (/^(?:ball|ball\s*start|ball\s*in\s*air|bowling|bowler\s*running|in\s*air)$/i.test(s)) return 'Ball';
     if (/^(?:0|•|\.|dot|dot\s*ball|0\s*runs?|no\s*run)$/i.test(s)) return '.';
     const runM = s.match(/^([1-6])(?:\s*runs?)?$/i);
@@ -1148,8 +1172,9 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       : undefined;
 
   // Render an individual ball badge according to color & styling specs
-  const renderBallBadge = (b: string, key: string | number) => {
-    const formattedB = formatBallSymbolToCallout(b) || b;
+  const renderBallBadge = (b: any, key: string | number) => {
+    const rawB = safeStr(b, '.');
+    const formattedB = formatBallSymbolToCallout(rawB) || (rawB !== '[object Object]' ? rawB : '.');
     const isWktBadge = /^(?:C|B|LBW|R(?:\+\d+)?|W(?:\+\d+)?|Wickets|Caught|Bowled|Run Out|Stumped|Hit Wicket)$/i.test(formattedB);
     const isFireBadge = formattedB.includes('🔥') || /^(?:NB(?:\+\d+)?|Free\s*Hit)/i.test(formattedB);
     const isBoundaryBadge = formattedB === '4' || formattedB === '6' || formattedB === 'WD+4' || formattedB === '4b' || formattedB === '4lb';
@@ -1494,7 +1519,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
     return false;
   })();
 
-  const centerCalloutText = isUpcomingMatch
+  const rawCenterCallout = isUpcomingMatch
     ? (lang === 'bn' ? 'আপকামিং ম্যাচ' : 'UPCOMING')
     : isFinished
       ? (cleanLiveStatusText || (lang === 'bn' ? 'ম্যাচ সম্পন্ন' : 'Match Completed'))
@@ -1505,6 +1530,14 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
           : (formatBallSymbolToCallout(cleanLiveBallEvent) ||
              formatBallSymbolToCallout(lastRecentBallSym) ||
              (cleanLiveStatusText && !/\bneed[s]?\s+\d+\s+runs?\b/i.test(cleanLiveStatusText) ? cleanLiveStatusText : 'Ball'));
+
+  const centerCalloutText = (() => {
+    const s = safeStr(rawCenterCallout);
+    if (!s || s === '[object Object]') {
+      return isUpcomingMatch ? (lang === 'bn' ? 'আপকামিং ম্যাচ' : 'UPCOMING') : 'Ball';
+    }
+    return s;
+  })();
 
   const isFireCallout = !isWicketCallout && (centerCalloutText.includes('🔥') || /^(?:NB(?:\+\d+)?|Free\s*Hit)/i.test(centerCalloutText));
 

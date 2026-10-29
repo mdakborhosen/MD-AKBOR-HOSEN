@@ -298,16 +298,47 @@ export async function parseLiveCricketUrlEdge(
 
         if (sv3.bname) {
           const bwrParts = String(sv3.bwr || '0-0').split('-');
+          const bwName = String(sv3.bowler_full_name || sv3.bname).trim();
           bowler = {
-            name: sv3.bowler_full_name || sv3.bname,
+            name: bwName,
             overs: sv3.bover || '0.0',
             wickets: parseInt(bwrParts[0] || '0', 10),
             runs: parseInt(bwrParts[1] || '0', 10)
           };
         }
 
-        if (Array.isArray(sv3.rb)) {
-          recentBalls = sv3.rb.flatMap((r: any) => (Array.isArray(r.b) ? r.b : [])).slice(-18).map(String);
+        if (Array.isArray(sv3.lastovers) && sv3.lastovers.length > 0) {
+          const overBalls: string[] = [];
+          for (const ov of sv3.lastovers.slice(-2)) {
+            if (Array.isArray(ov?.overinfo)) {
+              for (const tok of ov.overinfo) {
+                const str = typeof tok === 'object' ? String(tok?.u || tok?.b || tok?.val || '') : String(tok || '');
+                if (str && str !== '[object Object]') overBalls.push(str.trim());
+              }
+            }
+          }
+          if (overBalls.length > 0) {
+            recentBalls = overBalls;
+          }
+        } else if (Array.isArray(sv3.rb)) {
+          const rawItems = sv3.rb.flatMap((r: any) => {
+            if (Array.isArray(r?.b)) return r.b;
+            if (r && typeof r === 'object' && r.b !== undefined) return [r.b];
+            return [r];
+          });
+          recentBalls = rawItems
+            .map((item: any) => {
+              if (item === null || item === undefined) return '';
+              if (typeof item === 'string') return item.trim() === '[object Object]' ? '' : item.trim();
+              if (typeof item === 'number') return String(item);
+              if (typeof item === 'object') {
+                const s = item.u || item.b || item.val || item.runs || item.symbol || item.text;
+                return s ? String(s).trim() : '';
+              }
+              return '';
+            })
+            .filter((tok: string) => tok && tok !== '[object Object]')
+            .slice(-24);
         }
       }
 
@@ -428,7 +459,8 @@ export async function parseLiveCricketUrlEdge(
     statusText,
     recentBalls,
     batsmen,
-    bowler,
+    bowler: typeof bowler === 'string' ? bowler : (bowler?.name || undefined),
+    liveBowlerStats: bowler && typeof bowler === 'object' ? bowler : (bowler ? { name: String(bowler) } : undefined),
     matchStartTime,
     matchStartTimeIso,
     isUpcoming: isUpcoming || /yet to begin|not started|scheduled/i.test(statusText),

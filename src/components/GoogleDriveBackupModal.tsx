@@ -20,7 +20,9 @@ import {
   Calendar,
   Sparkles,
   ArrowLeft,
-  Home
+  Home,
+  Download,
+  Upload
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { toast } from 'sonner';
@@ -166,6 +168,74 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     }
   };
 
+  const handleDownloadLocalBackup = () => {
+    try {
+      const backupPayload: CricketAppStateBackup = {
+        appName: 'Cricket Score Master',
+        version: '2.0',
+        exportDate: new Date().toISOString(),
+        backupTrigger: 'Manual Local JSON Backup',
+        matches,
+        currentMatchId,
+        schedule,
+        tournaments,
+        displayConfigs,
+        savedSlipCards,
+        activeSlipCardId,
+      };
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupPayload, null, 2));
+      const downloadAnchor = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `cricket-backup-${dateStr}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      toast.success(
+        lang === 'bn'
+          ? 'সম্পূর্ণ ব্যাকআপ ফাইল (.json) সফলভাবে ডাউনলোড হয়েছে!'
+          : 'Complete backup file (.json) downloaded successfully!'
+      );
+    } catch (err: any) {
+      toast.error(lang === 'bn' ? 'ডাউনলোড করতে ব্যর্থ হয়েছে' : 'Download failed');
+    }
+  };
+
+  const handleUploadLocalBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const restored: CricketAppStateBackup = JSON.parse(content);
+        if (
+          !restored ||
+          (!Array.isArray(restored.matches) &&
+            !Array.isArray(restored.schedule) &&
+            !Array.isArray(restored.savedSlipCards))
+        ) {
+          throw new Error(lang === 'bn' ? 'অকার্যকর ব্যাকআপ ফাইল' : 'Invalid backup file structure');
+        }
+
+        onRestoreState(restored);
+        toast.success(
+          lang === 'bn'
+            ? 'লোকাল ব্যাকআপ ফাইল থেকে সফলভাবে সমস্ত ডেটা রিস্টোর হয়েছে!'
+            : 'Application state restored successfully from file!'
+        );
+        onClose();
+      } catch (err: any) {
+        toast.error(lang === 'bn' ? 'ব্যাকআপ ফাইলটি সঠিক নয়' : (err?.message || 'Invalid backup file'));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const handleSignIn = async () => {
     setIsSigningIn(true);
     try {
@@ -182,7 +252,11 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       }
     } catch (err: any) {
       console.error('Sign in failed:', err);
-      toast.error(lang === 'bn' ? 'সাইন ইন করা সম্ভব হয়নি। আবার চেষ্টা করুন।' : (err?.message || 'Sign in failed.'));
+      toast.error(
+        lang === 'bn'
+          ? 'গুগল সাইন-ইন সম্পন্ন হয়নি (পপআপ ব্লক বা ক্লাউড অরিজিন সীমাবদ্ধতা)। আপনি সরাসরি নিচের "ডাউনলোড ব্যাকআপ (JSON)" বাটন দিয়ে ব্যাকআপ সংরক্ষণ করতে পারেন।'
+          : (err?.message || 'Google sign-in failed. You can use direct JSON backup below.')
+      );
     } finally {
       setIsSigningIn(false);
     }
@@ -480,6 +554,52 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
               </div>
             );
           })()}
+
+          {/* 100% Reliable Local File Backup & Restore (Zero Login Required) */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-slate-900 to-cyan-950/70 border border-indigo-500/40 shadow-xl space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-400 shrink-0">
+                  <Download size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                    <span>{lang === 'bn' ? 'ডাইরেক্ট লোকাল ফাইল ব্যাকআপ (লগইন ছাড়াই ১০০% কার্যকর)' : 'Direct Local File Backup (No Login Required)'}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-[10px] font-black">
+                      OFFLINE
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    {lang === 'bn'
+                      ? 'গুগল অ্যাকাউন্টে সাইন-ইন সংক্রান্ত কোনো ত্রুটি ছাড়াই সরাসরি আপনার ডিভাইসে সম্পূর্ণ ব্যাকআপ ফাইল (.json) সেভ এবং যেকোনো সময় রিস্টোর করুন।'
+                      : 'Save and restore complete JSON backup files directly on your device without any Google login dependency.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <Button
+                type="button"
+                onClick={handleDownloadLocalBackup}
+                className="w-full sm:flex-1 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all"
+              >
+                <Download size={15} />
+                <span>{lang === 'bn' ? 'ডাউনলোড ব্যাকআপ (.json)' : 'Download Backup (.json)'}</span>
+              </Button>
+
+              <label className="w-full sm:flex-1 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all">
+                <Upload size={15} className="text-cyan-400" />
+                <span>{lang === 'bn' ? 'ফাইল থেকে রিস্টোর করুন' : 'Restore from File'}</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleUploadLocalBackup}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
 
           {/* User Auth Banner */}
           {!user ? (

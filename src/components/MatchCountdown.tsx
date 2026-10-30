@@ -126,23 +126,17 @@ export function formatMatchDateTimeDisplay(
 
 // Robust parser for match start time strings or ISO timestamps
 export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: string, matchDate?: string): number | null {
-  if (isoTime) {
+  const raw = typeof startTime === 'string' ? startTime.trim() : '';
+
+  // If no startTime was provided, check if isoTime has a valid timestamp
+  if (!raw && isoTime) {
     const isoRaw = String(isoTime).trim();
-    // Only accept isoTime directly if it includes a time component (T... or HH:mm)
     if (/T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(isoRaw)) {
       const t = new Date(isoRaw).getTime();
       if (!isNaN(t)) return t;
     }
   }
-  if (!startTime || typeof startTime !== 'string') {
-    if (matchDate && /T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(String(matchDate))) {
-      const md = new Date(matchDate).getTime();
-      if (!isNaN(md)) return md;
-    }
-    return null;
-  }
 
-  const raw = startTime.trim();
   if (!raw) {
     if (matchDate && /T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(String(matchDate))) {
       const md = new Date(matchDate).getTime();
@@ -304,6 +298,15 @@ export function parseMatchStartTimeToTimestamp(startTime?: string, isoTime?: str
     const candidateDayStart = new Date(y, specificMonth, specificDay, 0, 0, 0).getTime();
     if (!isNaN(candidateDayStart) && candidateDayStart > startOfToday) {
       return new Date(y, specificMonth, specificDay, 12, 0, 0).getTime();
+    }
+  }
+
+  // Fallback to isoTime if startTime alone did not resolve a timestamp
+  if (isoTime) {
+    const isoRaw = String(isoTime).trim();
+    if (/T\d{2}:\d{2}|\b\d{1,2}:\d{2}\b/.test(isoRaw)) {
+      const t = new Date(isoRaw).getTime();
+      if (!isNaN(t)) return t;
     }
   }
 

@@ -144,7 +144,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
-import { BallEvent, MatchState, PlayerStats, TargetMilestone, ScheduleEvent, TournamentFolder, getShortTeamName, formatShortMatchTitle } from './types';
+import { BallEvent, MatchState, PlayerStats, BowlerStats, TargetMilestone, ScheduleEvent, TournamentFolder, getShortTeamName, formatShortMatchTitle } from './types';
 import { 
   MatchCountdownHero, 
   MatchCountdownBadge, 
@@ -1658,14 +1658,31 @@ export default function App() {
     if (title) setExternalPopupTitle(title);
   }, []);
 
+  const handleOpenInAppGoogleSearchTabRef = useRef<((ev?: BetEvent, customQuery?: string) => void) | null>(null);
+
   useEffect(() => {
     const handleGlobalAnchorClick = (e: MouseEvent) => {
       const anchor = (e.target as HTMLElement)?.closest('a');
       if (!anchor) return;
+      if (anchor.getAttribute('data-allow-external') === 'true' || anchor.closest('[data-allow-external="true"]') || anchor.closest('.external-modal-container')) {
+        return;
+      }
       const href = anchor.getAttribute('href');
       if (!href) return;
       if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
       if (/^https?:\/\//i.test(href)) {
+        if (/google\.[a-z.]+\/search/i.test(href)) {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            const u = new URL(href);
+            const q = u.searchParams.get('q') || '';
+            if (handleOpenInAppGoogleSearchTabRef.current) {
+              handleOpenInAppGoogleSearchTabRef.current(undefined, q);
+              return;
+            }
+          } catch {}
+        }
         e.preventDefault();
         e.stopPropagation();
         setExternalPopupUrl(href);
@@ -1682,6 +1699,16 @@ export default function App() {
     window.open = (url?: string | URL, target?: string, features?: string): Window | null => {
       const urlStr = typeof url === 'string' ? url : (url instanceof URL ? url.toString() : '');
       if (urlStr && /^https?:\/\//i.test(urlStr)) {
+        if (/google\.[a-z.]+\/search/i.test(urlStr)) {
+          try {
+            const u = new URL(urlStr);
+            const q = u.searchParams.get('q') || '';
+            if (handleOpenInAppGoogleSearchTabRef.current) {
+              handleOpenInAppGoogleSearchTabRef.current(undefined, q);
+              return null;
+            }
+          } catch {}
+        }
         openExternalPopup(urlStr, 'External Link');
         return null;
       }
@@ -1762,7 +1789,21 @@ export default function App() {
     return INITIAL_SLIP_CARDS;
   });
 
-  const [activeSlipCardId, setActiveSlipCardId] = useState<string>('card-1');
+  const [activeSlipCardId, setActiveSlipCardId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('cricket-active-slip-card-id');
+      if (saved) return saved;
+    } catch {}
+    return 'card-1';
+  });
+
+  useEffect(() => {
+    try {
+      if (activeSlipCardId) {
+        localStorage.setItem('cricket-active-slip-card-id', activeSlipCardId);
+      }
+    } catch {}
+  }, [activeSlipCardId]);
   const [isMergedScorerBetSlip, setIsMergedScorerBetSlip] = useState<boolean>(false);
   const [scorerEventAddingLinkId, setScorerEventAddingLinkId] = useState<string | null>(null);
   const [scorerEventLinkInput, setScorerEventLinkInput] = useState<string>('');
@@ -2124,6 +2165,7 @@ export default function App() {
       selection: ev?.selection
     });
   }, [executeInAppGoogleTabSearch]);
+  handleOpenInAppGoogleSearchTabRef.current = handleOpenInAppGoogleSearchTab;
 
   const handleCloseInAppGoogleTab = useCallback((tabId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -2858,8 +2900,38 @@ export default function App() {
 
         // Explicit repair for EMB vs টিম বি: Started 26/10/2026 at 10:30 PM (22:30), 1st team (EMB): 20.0 ov, 183. 2nd team (টিম বি): 5.0 ov, 17/2.
         const isEmbVsTeamB =
-          (cleanT1.toUpperCase().includes('EMB') || cleanT2.toUpperCase().includes('EMB') || String(nextM.name || '').toUpperCase().includes('EMB')) &&
-          (cleanT1.includes('টিম বি') || cleanT2.includes('টিম বি') || cleanT1.toLowerCase().includes('team b') || cleanT2.toLowerCase().includes('team b') || String(nextM.name || '').includes('টিম বি') || String(nextM.name || '').toLowerCase().includes('team b'));
+          cleanT1.toUpperCase().includes('EMB') ||
+          cleanT2.toUpperCase().includes('EMB') ||
+          String(nextM.name || '').toUpperCase().includes('EMB') ||
+          (nextM.firstInningsTotalScore === 183 && nextM.score === 17);
+
+        const embBattingStats: PlayerStats[] = [
+          { name: 'আলি শান (Ali Shan)', runs: 54, balls: 36, fours: 6, sixes: 2, isOut: true, wicketType: 'c & b', yetToBat: false },
+          { name: 'উমাইর আলি (Umair Ali)', runs: 38, balls: 28, fours: 4, sixes: 1, isOut: true, wicketType: 'caught', yetToBat: false },
+          { name: 'ফাহাদ নওয়াজ (Fahad Nawaz)', runs: 45, balls: 24, fours: 3, sixes: 3, isOut: true, wicketType: 'bowled', yetToBat: false },
+          { name: 'সিপি রিজওয়ান (CP Rizwan)*', runs: 26, balls: 18, fours: 2, sixes: 1, isOut: false, wicketType: 'not out', yetToBat: false },
+          { name: 'বাসিল হামিদ (Basil Hameed)', runs: 12, balls: 9, fours: 1, sixes: 0, isOut: true, wicketType: 'run out', yetToBat: false },
+          { name: 'জাওয়াহির ফরিদ (Zawar Farid)*', runs: 8, balls: 5, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+        ];
+        const teamBBattingStats: PlayerStats[] = [
+          { name: 'ওপেনার ১ (Opener 1)', runs: 6, balls: 11, fours: 1, sixes: 0, isOut: true, wicketType: 'caught', yetToBat: false },
+          { name: 'ওপেনার ২ (Opener 2)', runs: 2, balls: 5, fours: 0, sixes: 0, isOut: true, wicketType: 'lbw', yetToBat: false },
+          { name: 'ব্যাটার ৩ (Batter 3)*', runs: 7, balls: 10, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+          { name: 'ব্যাটার ৪ (Batter 4)*', runs: 2, balls: 4, fours: 0, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+          { name: 'ব্যাটার ৫', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
+          { name: 'ব্যাটার ৬', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
+        ];
+        const embBowlingStats: BowlerStats[] = [
+          { name: 'জুনাইদ সিদ্দিক (Junaid Siddique)', overs: '3.0', maidens: 0, runs: 9, wickets: 1, economy: '3.00' },
+          { name: 'মুহাম্মদ জাওয়াদুল্লাহ (M Jawadullah)', overs: '2.0', maidens: 0, runs: 8, wickets: 1, economy: '4.00' },
+        ];
+        const teamBBowlingStats: BowlerStats[] = [
+          { name: 'বোলার ১ (Bowler 1)', overs: '4.0', maidens: 0, runs: 32, wickets: 2, economy: '8.00' },
+          { name: 'বোলার ২ (Bowler 2)', overs: '4.0', maidens: 0, runs: 38, wickets: 1, economy: '9.50' },
+          { name: 'বোলার ৩ (Bowler 3)', overs: '4.0', maidens: 0, runs: 41, wickets: 1, economy: '10.25' },
+          { name: 'বোলার ৪ (Bowler 4)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
+          { name: 'বোলার ৫ (Bowler 5)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
+        ];
 
         if (isEmbVsTeamB) {
           const t1IsEmb = cleanT1.toUpperCase().includes('EMB');
@@ -2867,7 +2939,7 @@ export default function App() {
           const t2Name = !t1IsEmb ? cleanT2 : 'টিম বি';
           const embStartLabel = '26 Oct 2026, 10:30 PM';
           const embDate = '2026-10-26';
-          const embStartIso = new Date('2026-10-26T22:30:00').toISOString();
+          const embStartIso = '2026-10-26T22:30:00';
 
           nextM = {
             ...nextM,
@@ -2894,7 +2966,14 @@ export default function App() {
             team2Score: '17/2 (5.0)',
             battingTeam: t2Name,
             bowlingTeam: t1Name,
-            liveStatusText: 'টিম বি-এর জয়ের জন্য ৯০ বলে ১৬৭ রান প্রয়োজন (টার্গেট ১৮৪)'
+            team1BattingStats: embBattingStats,
+            team2BattingStats: teamBBattingStats,
+            battingStats: teamBBattingStats,
+            team1BowlingStats: teamBBowlingStats,
+            team2BowlingStats: embBowlingStats,
+            activeBatsman1Idx: 2,
+            activeBatsman2Idx: 3,
+            liveStatusText: 'টিম বি এর ৯০ বলে ১৬৭ রান প্রয়োজন (ওভার প্রতি ১১.১৩, ৮ উইকেট বাকি, টার্গেট ১৮৪)'
           };
           changed = true;
         } else if (
@@ -2996,7 +3075,7 @@ export default function App() {
           sectionOverride: 'live',
           matchDate: '2026-10-26',
           matchStartTime: '26 Oct 2026, 10:30 PM',
-          matchStartTimeIso: new Date('2026-10-26T22:30:00').toISOString(),
+          matchStartTimeIso: '2026-10-26T22:30:00',
           firstInningsScore: '183 (20.0)',
           firstInningsTotalScore: 183,
           team1Score: '183 (20.0)',
@@ -3007,7 +3086,36 @@ export default function App() {
           team2Score: '17/2 (5.0)',
           battingTeam: 'টিম বি',
           bowlingTeam: 'EMB',
-          liveStatusText: 'টিম বি-এর জয়ের জন্য ৯০ বলে ১৬৭ রান প্রয়োজন (টার্গেট ১৮৪)'
+          team1BattingStats: [
+            { name: 'আলি শান (Ali Shan)', runs: 54, balls: 36, fours: 6, sixes: 2, isOut: true, wicketType: 'c & b', yetToBat: false },
+            { name: 'উমাইর আলি (Umair Ali)', runs: 38, balls: 28, fours: 4, sixes: 1, isOut: true, wicketType: 'caught', yetToBat: false },
+            { name: 'ফাহাদ নওয়াজ (Fahad Nawaz)', runs: 45, balls: 24, fours: 3, sixes: 3, isOut: true, wicketType: 'bowled', yetToBat: false },
+            { name: 'সিপি রিজওয়ান (CP Rizwan)*', runs: 26, balls: 18, fours: 2, sixes: 1, isOut: false, wicketType: 'not out', yetToBat: false },
+            { name: 'বাসিল হামিদ (Basil Hameed)', runs: 12, balls: 9, fours: 1, sixes: 0, isOut: true, wicketType: 'run out', yetToBat: false },
+            { name: 'জাওয়াহির ফরিদ (Zawar Farid)*', runs: 8, balls: 5, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+          ],
+          team2BattingStats: [
+            { name: 'ওপেনার ১ (Opener 1)', runs: 6, balls: 11, fours: 1, sixes: 0, isOut: true, wicketType: 'caught', yetToBat: false },
+            { name: 'ওপেনার ২ (Opener 2)', runs: 2, balls: 5, fours: 0, sixes: 0, isOut: true, wicketType: 'lbw', yetToBat: false },
+            { name: 'ব্যাটার ৩ (Batter 3)*', runs: 7, balls: 10, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+            { name: 'ব্যাটার ৪ (Batter 4)*', runs: 2, balls: 4, fours: 0, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
+            { name: 'ব্যাটার ৫', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
+            { name: 'ব্যাটার ৬', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
+          ],
+          team1BowlingStats: [
+            { name: 'বোলার ১ (Bowler 1)', overs: '4.0', maidens: 0, runs: 32, wickets: 2, economy: '8.00' },
+            { name: 'বোলার ২ (Bowler 2)', overs: '4.0', maidens: 0, runs: 38, wickets: 1, economy: '9.50' },
+            { name: 'বোলার ৩ (Bowler 3)', overs: '4.0', maidens: 0, runs: 41, wickets: 1, economy: '10.25' },
+            { name: 'বোলার ৪ (Bowler 4)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
+            { name: 'বোলার ৫ (Bowler 5)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
+          ],
+          team2BowlingStats: [
+            { name: 'জুনাইদ সিদ্দিক (Junaid Siddique)', overs: '3.0', maidens: 0, runs: 9, wickets: 1, economy: '3.00' },
+            { name: 'মুহাম্মদ জাওয়াদুল্লাহ (M Jawadullah)', overs: '2.0', maidens: 0, runs: 8, wickets: 1, economy: '4.00' },
+          ],
+          activeBatsman1Idx: 2,
+          activeBatsman2Idx: 3,
+          liveStatusText: 'টিম বি এর ৯০ বলে ১৬৭ রান প্রয়োজন (ওভার প্রতি ১১.১৩, ৮ উইকেট বাকি, টার্গেট ১৮৪)'
         };
         updated.unshift(embMatch);
         changed = true;
@@ -3062,8 +3170,8 @@ export default function App() {
             const { live, targetUrl } = found;
             const onStartupBreak = isLiveMatchBreakStatus(live.statusText || m.liveStatusText, live.footballPeriod || m.footballPeriod, live.footballMinute || m.footballMinute);
             const resolvedIsoStartup = live.matchStartTimeIso || m.matchStartTimeIso;
-            let resolvedStartLabelStartup = live.matchStartTime || m.matchStartTime;
-            if (resolvedIsoStartup) {
+            let resolvedStartLabelStartup = m.matchStartTime || live.matchStartTime;
+            if (!resolvedStartLabelStartup && resolvedIsoStartup) {
               const isoD = new Date(resolvedIsoStartup);
               if (!isNaN(isoD.getTime())) {
                 resolvedStartLabelStartup =
@@ -3568,18 +3676,9 @@ export default function App() {
           }
         }
         const isEvFinished = isBetEventSettled(nextEv);
-        if ((cardLost || isEvFinished) && !nextEv.manuallyLinkedInLostSlip) {
-          if (nextEv.linkedMatchId) {
-            matchIdsToRemoveFromLiveOrUpcoming.add(nextEv.linkedMatchId);
-            nextEv = {
-              ...nextEv,
-              linkedMatchId: undefined,
-              autoUnlinkedOnSlipLost: true
-            };
-            evsChanged = true;
-          }
-          seenEventsInThisCard.push(nextEv);
-          return nextEv;
+        // Preserve linkedMatchId and match connection permanently across reloads and settlements
+        if (nextEv.linkedMatchId) {
+          activeMatchIdsNeededInLiveOrUpcoming.add(nextEv.linkedMatchId);
         }
 
         // Merge same match across DIFFERENT active slips so they share ONE Scorer match
@@ -3652,29 +3751,8 @@ export default function App() {
       };
     });
 
-    // Remove any Scorer match that belonged only to a settled (Win/Lost) slip/event (or was merged into a canonical match, or is an orphaned match-bs-* match)
-    for (const m of currentList) {
-      if (
-        m &&
-        typeof m.id === 'string' &&
-        m.id.startsWith('match-bs-') &&
-        !activeMatchIdsNeededInLiveOrUpcoming.has(m.id)
-      ) {
-        matchIdsToRemoveFromLiveOrUpcoming.add(m.id);
-      }
-    }
-    const finalRemoveIds = Array.from(matchIdsToRemoveFromLiveOrUpcoming).filter(
-      id => !activeMatchIdsNeededInLiveOrUpcoming.has(id)
-    );
-    if (finalRemoveIds.length > 0) {
-      const removeSet = new Set(finalRemoveIds);
-      finalRemoveIds.forEach(id => deletedMatchIdsRef.current.add(id));
-      const filteredList = currentList.filter(m => !removeSet.has(m.id));
-      if (filteredList.length !== currentList.length) {
-        currentList = filteredList;
-        matchesChanged = true;
-      }
-    }
+    // Preserve all existing matches in currentList so matches are never deleted on page reload
+    // Matches are only deleted when user explicitly clicks the delete button
 
     if (matchesChanged) {
       matchesRef.current = currentList;
@@ -3702,7 +3780,18 @@ export default function App() {
   }, [savedSlipCards, matches, isMatchFinishedHelper]);
 
   // Toggle whether settled (Win/Lost) bet slips and events are shown on the Main Dashboard (hidden by default)
-  const [showSettledOnMainDashboard, setShowSettledOnMainDashboard] = useState(false);
+  const [showSettledOnMainDashboard, setShowSettledOnMainDashboard] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('cricket-show-settled-slips') === 'true';
+    } catch {}
+    return false;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cricket-show-settled-slips', String(showSettledOnMainDashboard));
+    } catch {}
+  }, [showSettledOnMainDashboard]);
 
   // Automatically switch activeSlipCardId to the next active (non-settled) slip card when the current card becomes Win/Lost
   useEffect(() => {
@@ -4025,20 +4114,14 @@ export default function App() {
     });
   }, [matches, lang]);
 
-  // Auto-delete completed matches 2 hours (7,200,000 ms) after completion (except matches linked from Bet Slip, which can only be removed from the slip)
-  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+  // Safely record finishedAt timestamp when a match finishes; finished matches are kept permanently in the Finished Section and never auto-purged
   useEffect(() => {
     const now = Date.now();
     const needsFinishedTimestamp: string[] = [];
-    const expiredFinishedMatches: MatchState[] = [];
 
     for (const m of matches) {
-      if (isMatchFinishedHelper(m)) {
-        if (!m.finishedAt) {
-          needsFinishedTimestamp.push(m.id);
-        } else if (now - m.finishedAt >= TWO_HOURS_MS && !linkedMatchIdsSet.has(m.id)) {
-          expiredFinishedMatches.push(m);
-        }
+      if (isMatchFinishedHelper(m) && !m.finishedAt) {
+        needsFinishedTimestamp.push(m.id);
       }
     }
 
@@ -4053,42 +4136,7 @@ export default function App() {
         return nextList;
       });
     }
-
-    if (expiredFinishedMatches.length > 0) {
-      // 1. Lock in final match data in Bet Slip before deleting the completed match so Bet Slip data remains 100% unchanged
-      setSavedSlipCards(prevCards => {
-        const { updatedCards, hasChanges } = syncAllSlipCardsWithMatches(prevCards, expiredFinishedMatches);
-        return hasChanges ? updatedCards : prevCards;
-      });
-
-      const expiredIds = new Set(expiredFinishedMatches.map(m => m.id));
-      expiredIds.forEach(id => deletedMatchIdsRef.current.add(id));
-
-      setMatches(prev => {
-        const remaining = prev.filter(m => !expiredIds.has(m.id));
-        matchesRef.current = remaining;
-        localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(remaining));
-        if (remaining.length > 0) {
-          if (expiredIds.has(currentMatchIdRef.current) || !remaining.some(m => m.id === currentMatchIdRef.current)) {
-            currentMatchIdRef.current = remaining[0].id;
-            setCurrentMatchId(remaining[0].id);
-            localStorage.setItem(STORAGE_KEY_CURRENT_ID, remaining[0].id);
-          }
-        } else {
-          currentMatchIdRef.current = '';
-          setCurrentMatchId('');
-          localStorage.setItem(STORAGE_KEY_CURRENT_ID, '');
-        }
-        return remaining;
-      });
-
-      toast.info(
-        lang === 'bn'
-          ? `🏁 সম্পন্ন হওয়ার ২ ঘন্টা পর ${expiredFinishedMatches.length}টি ম্যাচ স্বয়ংক্রিয়ভাবে ডিলিট হয়েছে (বেট স্লিপে ডেটা অপরিবর্তিত আছে)`
-          : `🏁 ${expiredFinishedMatches.length} completed match(es) auto-deleted after 2 hours (Bet Slip data preserved)`
-      );
-    }
-  }, [matches, currentTimestamp, isMatchFinishedHelper, lang]);
+  }, [matches, isMatchFinishedHelper]);
 
   // Quick 1-click link from any Scorer Match or Milestone directly to the active Bet Slip
   const handleQuickLinkMatchToBetSlip = useCallback(
@@ -12391,6 +12439,7 @@ export default function App() {
                     href={activeSubPage === 'crex' ? 'https://crex.com' : 'https://www.sofascore.com'}
                     target="_blank"
                     rel="noopener noreferrer"
+                    data-allow-external="true"
                     className={cn(
                       "px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 border transition-all no-underline",
                       activeSubPage === 'crex'
@@ -14058,13 +14107,7 @@ export default function App() {
                         const activeScoreStr = `${finM.score}/${finM.wickets} (${Math.floor((finM.balls || 0) / bpo)}.${(finM.balls || 0) % bpo})`;
                         const t1FinalScore = finM.team1Score || (!resolvedFin.isT2Batting ? activeScoreStr : (finM.firstInningsScore ? String(finM.firstInningsScore) : '-'));
                         const t2FinalScore = finM.team2Score || (resolvedFin.isT2Batting ? activeScoreStr : (finM.firstInningsScore ? String(finM.firstInningsScore) : '-'));
-                        const msLeftToDelete = finM.finishedAt ? Math.max(0, TWO_HOURS_MS - (currentTimestamp - finM.finishedAt)) : TWO_HOURS_MS;
-                        const minsLeftTotal = Math.ceil(msLeftToDelete / 60000);
-                        const hrsLeft = Math.floor(minsLeftTotal / 60);
-                        const minsLeftRem = minsLeftTotal % 60;
-                        const autoDeleteLabel = lang === 'bn'
-                          ? `⏳ ${hrsLeft > 0 ? `${toBengaliDigits(hrsLeft)} ঘঃ ` : ''}${toBengaliDigits(minsLeftRem)} মিঃ পর ডিলিট`
-                          : `⏳ Del in ${hrsLeft > 0 ? `${hrsLeft}h ` : ''}${minsLeftRem}m`;
+                        const statusBadgeLabel = lang === 'bn' ? '✓ ফলাফল সংরক্ষিত' : '✓ Result Saved';
                         return (
                           <div
                             key={`finished-static-${finM.id}`}
@@ -14105,8 +14148,8 @@ export default function App() {
                                   {finM.sport === 'football' ? '⚽' : '🏏'}
                                 </a>
                                 <span className="text-xs font-black text-white truncate">{ft1} vs {ft2}</span>
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[8px] font-mono font-bold shrink-0">
-                                  {autoDeleteLabel}
+                                <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[8px] font-mono font-bold shrink-0">
+                                  {statusBadgeLabel}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">

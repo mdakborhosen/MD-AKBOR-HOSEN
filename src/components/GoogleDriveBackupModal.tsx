@@ -34,6 +34,7 @@ import { MatchState, ScheduleEvent, TournamentFolder } from '../types';
 import { 
   initGoogleAuth, 
   signInWithGoogle, 
+  signInWithGoogleRedirect,
   logoutGoogle, 
   getCachedAccessToken,
   clearCachedAccessToken
@@ -252,12 +253,32 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
       }
     } catch (err: any) {
       console.error('Sign in failed:', err);
-      toast.error(
-        lang === 'bn'
-          ? 'গুগল সাইন-ইন সম্পন্ন হয়নি (পপআপ ব্লক বা ক্লাউড অরিজিন সীমাবদ্ধতা)। আপনি সরাসরি নিচের "ডাউনলোড ব্যাকআপ (JSON)" বাটন দিয়ে ব্যাকআপ সংরক্ষণ করতে পারেন।'
-          : (err?.message || 'Google sign-in failed. You can use direct JSON backup below.')
-      );
+      const msg = String(err?.message || '').toLowerCase();
+      const isPopupBlocked = msg.includes('popup') || msg.includes('window');
+      if (isPopupBlocked) {
+        toast.error(
+          lang === 'bn'
+            ? 'ব্রাউজারে পপআপ ব্লক রয়েছে! ব্রাউজারের পপআপ অনুমতি দিন অথবা নিচের রিডাইরেক্ট সাইন-ইন বা অফলাইন ব্যাকআপ ব্যবহার করুন।'
+            : 'Popup window was blocked by browser! Please allow popups or use the Redirect Sign-In / offline backup.'
+        );
+      } else {
+        toast.error(
+          lang === 'bn'
+            ? 'গুগল সাইন-ইন সম্পন্ন হয়নি। আপনি সরাসরি নিচের অফলাইন JSON ব্যাকআপ ব্যবহার করতে পারেন।'
+            : (err?.message || 'Google sign-in failed. You can use direct offline backup.')
+        );
+      }
     } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignInRedirect = async () => {
+    setIsSigningIn(true);
+    try {
+      await signInWithGoogleRedirect();
+    } catch (err: any) {
+      toast.error(lang === 'bn' ? 'রিডাইরেক্ট সাইন-ইন ব্যর্থ হয়েছে' : (err?.message || 'Redirect sign-in failed'));
       setIsSigningIn(false);
     }
   };
@@ -636,6 +657,15 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                     ? (lang === 'bn' ? 'সাইন ইন হচ্ছে...' : 'Signing in...') 
                     : (lang === 'bn' ? 'গুগল দিয়ে সাইন ইন করুন' : 'Sign in with Google')}
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSignInRedirect}
+                disabled={isSigningIn}
+                className="text-[11px] text-blue-400 hover:text-blue-300 underline font-medium cursor-pointer pt-1"
+              >
+                {lang === 'bn' ? 'মোবাইলে পপআপ সমস্যা হলে: রিডাইরেক্ট দিয়ে সাইন ইন করুন' : 'Mobile popup issue? Sign in with Redirect'}
               </button>
             </Card>
           ) : (

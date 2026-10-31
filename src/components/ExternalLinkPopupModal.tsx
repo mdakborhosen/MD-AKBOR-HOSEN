@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, ExternalLink, RefreshCw, Copy, Check, Maximize2, Minimize2, Globe, Search, AlertCircle } from 'lucide-react';
+import { X, ExternalLink, RefreshCw, Copy, Check, Maximize2, Minimize2, Globe, Search, AlertCircle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
+import { unwrapRedirectUrl } from '../lib/betSlipScorerSync';
 
 interface ExternalLinkPopupModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface ExternalLinkPopupModalProps {
   url: string;
   title?: string;
   lang?: 'bn' | 'en';
+  onSyncLiveUrl?: (url: string) => void;
 }
 
 export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
@@ -15,7 +17,8 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
   onClose,
   url,
   title,
-  lang = 'bn'
+  lang = 'bn',
+  onSyncLiveUrl
 }) => {
   const [copied, setCopied] = useState(false);
   const [iframeKey, setIframeKey] = useState(1);
@@ -24,18 +27,37 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
 
   if (!isOpen || !url) return null;
 
-  const isGoogleSearch = Boolean(url && /google\.[a-z.]+\/search/i.test(url));
+  const rawUrl = (url || '').trim();
+  const unwrapped = unwrapRedirectUrl(rawUrl);
+  const effectiveUrl = unwrapped || rawUrl;
+
+  // Google strictly forbids embedding in iframes (returns Google 403 Forbidden).
+  // Any Google URL (search, redirect, landing page) must use the Native Query Viewer rather than an iframe.
+  const isGoogleUrl = Boolean(
+    effectiveUrl &&
+    (/(?:^https?:\/\/(?:[a-z0-9-]+\.)*google\.[a-z.]+)/i.test(effectiveUrl) ||
+     rawUrl.includes('google.com/url') ||
+     rawUrl.includes('/search?'))
+  );
+
   let googleSearchQuery = '';
-  if (isGoogleSearch) {
+  if (isGoogleUrl) {
     try {
-      const u = new URL(url);
-      googleSearchQuery = u.searchParams.get('q') || '';
+      const u = new URL(effectiveUrl.includes('google.') ? effectiveUrl : rawUrl);
+      googleSearchQuery = u.searchParams.get('q') || u.searchParams.get('query') || '';
     } catch {}
+    if (!googleSearchQuery && title && title !== 'External Link' && title !== 'External Page') {
+      googleSearchQuery = title;
+    }
   }
+
+  const isCrex = effectiveUrl.toLowerCase().includes('crex');
+  const isSofascore = effectiveUrl.toLowerCase().includes('sofascore');
+  const isSyncableSite = isCrex || isSofascore;
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(effectiveUrl);
       setCopied(true);
       toast.success(lang === 'bn' ? 'লিংক কপি হয়েছে!' : 'Link copied!');
       setTimeout(() => setCopied(false), 2000);
@@ -50,11 +72,11 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
   };
 
   const displayTitle = title || (
-    isGoogleSearch
+    isGoogleUrl
       ? (lang === 'bn' ? 'গুগল সার্চ' : 'Google Search')
-      : url.includes('crex')
+      : isCrex
       ? 'CREX Live'
-      : url.includes('sofascore')
+      : isSofascore
       ? 'SofaScore'
       : 'External Link'
   );
@@ -69,21 +91,34 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
         {/* Modal Top Header Bar */}
         <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 shrink-0 gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            {isGoogleSearch ? (
+            {isGoogleUrl ? (
               <Search className="w-4 h-4 text-blue-400 shrink-0" />
             ) : (
               <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
             )}
             <span className="font-bold text-xs sm:text-sm truncate text-white">{displayTitle}</span>
             <span className="hidden sm:inline-block text-[11px] font-mono text-slate-400 truncate max-w-[280px]">
-              {url}
+              {effectiveUrl}
             </span>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Quick Live Sync button for Crex & Sofascore */}
+            {isSyncableSite && onSyncLiveUrl && (
+              <button
+                type="button"
+                onClick={() => onSyncLiveUrl(effectiveUrl)}
+                className="p-1.5 px-2.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-300 text-xs font-black flex items-center gap-1 cursor-pointer transition active:scale-95"
+                title={lang === 'bn' ? 'এই ম্যাচটি সরাসরি স্কোরে সিঙ্ক করুন' : 'Sync this match to scoreboard'}
+              >
+                <Zap size={13} className="text-emerald-400" />
+                <span>{lang === 'bn' ? 'সিঙ্ক করুন' : 'Sync Live'}</span>
+              </button>
+            )}
+
             {/* Direct Open in Browser button with data-allow-external="true" to bypass iframe hijacking */}
             <a
-              href={url}
+              href={effectiveUrl}
               target="_blank"
               rel="noopener noreferrer"
               data-allow-external="true"
@@ -94,8 +129,9 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
               <ExternalLink size={13} />
             </a>
 
-            {!isGoogleSearch && (
+            {!isGoogleUrl && (
               <button
+                type="button"
                 onClick={handleRefresh}
                 title={lang === 'bn' ? 'রিলোড করুন' : 'Reload'}
                 className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
@@ -105,6 +141,7 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
             )}
 
             <button
+              type="button"
               onClick={handleCopy}
               title={lang === 'bn' ? 'লিংক কপি করুন' : 'Copy link'}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
@@ -113,6 +150,7 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={() => setIsFullscreen(prev => !prev)}
               title={isFullscreen ? (lang === 'bn' ? 'ছোট করুন' : 'Minimize') : (lang === 'bn' ? 'বড় করুন' : 'Maximize')}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
@@ -121,6 +159,7 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={onClose}
               title={lang === 'bn' ? 'বন্ধ করুন' : 'Close'}
               className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 hover:text-white transition cursor-pointer ml-1"
@@ -132,7 +171,7 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
 
         {/* Content Body */}
         <div className="relative flex-1 bg-slate-950 w-full h-full overflow-hidden flex flex-col">
-          {isGoogleSearch ? (
+          {isGoogleUrl ? (
             /* Special Native In-App Google Search Viewer to avoid Google 403 iframe error */
             <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-lg mx-auto space-y-4">
               <div className="w-16 h-16 rounded-3xl bg-blue-500/20 border border-blue-400/40 flex items-center justify-center text-blue-400 shadow-xl">
@@ -140,30 +179,34 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-black text-white">
-                  {lang === 'bn' ? 'গুগল সার্চ কোয়েরি' : 'Google Search Query'}
+                  {lang === 'bn' ? 'গুগল সার্চ ও ফলাফল' : 'Google Search & Results'}
                 </h3>
-                {googleSearchQuery && (
-                  <p className="text-sm font-mono text-cyan-300 bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-800 mt-2">
+                {googleSearchQuery ? (
+                  <p className="text-sm font-mono text-cyan-300 bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-800 mt-2 break-all">
                     "{googleSearchQuery}"
+                  </p>
+                ) : (
+                  <p className="text-xs font-mono text-slate-400 bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-800 mt-2 truncate">
+                    {effectiveUrl}
                   </p>
                 )}
                 <p className="text-xs text-slate-400 mt-2.5 leading-relaxed">
                   {lang === 'bn'
-                    ? 'গুগল তাদের সার্চ রেজাল্ট সরাসরি অন্য ওয়েবসাইটের আইফ্রেমে লোড করা ব্লক করে (Google 403 Error)। নিচে সরাসরি বাটনে চাপ দিয়ে ফলাফল ব্রাউজারে দেখুন।'
+                    ? 'ব্যবহারকারীর নিরাপত্তার স্বার্থে গুগল সরাসরি তাদের পেজ আইফ্রেমে লোড করা ব্লক করে (Google 403 Error)। নিচের বাটনে চাপ দিয়ে সরাসরি ব্রাউজারে গুগল ফলাফল দেখুন।'
                     : 'Google blocks embedding search results in iframes (403 forbidden). Use the button below to view search results directly in your browser.'}
                 </p>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-2">
                 <a
-                  href={url}
+                  href={effectiveUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   data-allow-external="true"
                   className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transition-all cursor-pointer no-underline active:scale-95"
                 >
                   <Search size={15} />
-                  <span>{lang === 'bn' ? 'গুগলে সার্চ রেজাল্ট দেখুন' : 'View Google Search Results'}</span>
+                  <span>{lang === 'bn' ? 'ব্রাউজারে গুগল ফলাফল খুলুন' : 'Open in Google Browser'}</span>
                   <ExternalLink size={13} />
                 </a>
 
@@ -190,7 +233,7 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
 
               <iframe
                 key={iframeKey}
-                src={url}
+                src={effectiveUrl}
                 title={displayTitle}
                 onLoad={() => setIsLoading(false)}
                 className="w-full flex-1 border-0 bg-white"
@@ -207,16 +250,28 @@ export const ExternalLinkPopupModal: React.FC<ExternalLinkPopupModalProps> = ({
                       : 'If site blocks iframe embedding, open in browser:'}
                   </span>
                 </span>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-allow-external="true"
-                  className="text-cyan-400 hover:underline flex items-center gap-1 text-[11px] font-bold shrink-0 no-underline"
-                >
-                  <span>{lang === 'bn' ? 'বাইরের ট্যাবে খুলুন' : 'Open externally'}</span>
-                  <ExternalLink size={12} />
-                </a>
+                <div className="flex items-center gap-2 shrink-0">
+                  {isSyncableSite && onSyncLiveUrl && (
+                    <button
+                      type="button"
+                      onClick={() => onSyncLiveUrl(effectiveUrl)}
+                      className="text-emerald-400 hover:underline flex items-center gap-1 text-[11px] font-bold cursor-pointer"
+                    >
+                      <Zap size={11} />
+                      <span>{lang === 'bn' ? 'ম্যাচ সিঙ্ক' : 'Sync'}</span>
+                    </button>
+                  )}
+                  <a
+                    href={effectiveUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-allow-external="true"
+                    className="text-cyan-400 hover:underline flex items-center gap-1 text-[11px] font-bold shrink-0 no-underline"
+                  >
+                    <span>{lang === 'bn' ? 'বাইরের ট্যাবে খুলুন' : 'Open externally'}</span>
+                    <ExternalLink size={12} />
+                  </a>
+                </div>
               </div>
             </>
           )}

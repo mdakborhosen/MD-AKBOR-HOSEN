@@ -1664,18 +1664,39 @@ export default function App() {
     const handleGlobalAnchorClick = (e: MouseEvent) => {
       const anchor = (e.target as HTMLElement)?.closest('a');
       if (!anchor) return;
-      if (anchor.getAttribute('data-allow-external') === 'true' || anchor.closest('[data-allow-external="true"]') || anchor.closest('.external-modal-container')) {
+      if (
+        anchor.getAttribute('data-allow-external') === 'true' ||
+        anchor.closest('[data-allow-external="true"]') ||
+        anchor.closest('.external-modal-container')
+      ) {
         return;
       }
       const href = anchor.getAttribute('href');
       if (!href) return;
       if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      
+      // Do NOT intercept Google Auth / Firebase Auth / OAuth system links
+      const isAuthUrl = Boolean(
+        href.includes('accounts.google.com') ||
+        href.includes('firebaseapp.com/__/auth') ||
+        href.includes('firebaseapp.com') ||
+        href.includes('googleapis.com') ||
+        href.includes('googleusercontent.com') ||
+        href.includes('oauth')
+      );
+      if (isAuthUrl) return;
+
       if (/^https?:\/\//i.test(href)) {
-        if (/google\.[a-z.]+\/search/i.test(href)) {
+        // Unwrap any redirect wrapper (e.g. google.com/url?q=...)
+        const unwrapped = unwrapRedirectUrl(href);
+        const effectiveHref = unwrapped || href;
+
+        // If it's a Google Search URL, route to the authentic In-App Google Search Tab
+        if (/(?:google\.[a-z.]+\/search)|(?:^https?:\/\/(?:[a-z0-9-]+\.)*google\.[a-z.]+\/?$)/i.test(effectiveHref)) {
           e.preventDefault();
           e.stopPropagation();
           try {
-            const u = new URL(href);
+            const u = new URL(effectiveHref);
             const q = u.searchParams.get('q') || '';
             if (handleOpenInAppGoogleSearchTabRef.current) {
               handleOpenInAppGoogleSearchTabRef.current(undefined, q);
@@ -1683,9 +1704,10 @@ export default function App() {
             }
           } catch {}
         }
+
         e.preventDefault();
         e.stopPropagation();
-        setExternalPopupUrl(href);
+        setExternalPopupUrl(effectiveHref);
         const linkTitle = anchor.getAttribute('title') || anchor.innerText?.trim() || 'External Page';
         setExternalPopupTitle(linkTitle.slice(0, 40));
       }
@@ -1698,21 +1720,52 @@ export default function App() {
     const originalOpen = window.open;
     window.open = (url?: string | URL, target?: string, features?: string): Window | null => {
       const urlStr = typeof url === 'string' ? url : (url instanceof URL ? url.toString() : '');
-      if (urlStr && /^https?:\/\//i.test(urlStr)) {
-        if (/google\.[a-z.]+\/search/i.test(urlStr)) {
-          try {
-            const u = new URL(urlStr);
-            const q = u.searchParams.get('q') || '';
-            if (handleOpenInAppGoogleSearchTabRef.current) {
-              handleOpenInAppGoogleSearchTabRef.current(undefined, q);
-              return null;
-            }
-          } catch {}
-        }
-        openExternalPopup(urlStr, 'External Link');
-        return null;
+      
+      // 1. NEVER intercept authentication popups, blank windows, or explicit popups with window geometry
+      const isAuthUrl = Boolean(
+        !urlStr ||
+        urlStr.includes('accounts.google.com') ||
+        urlStr.includes('firebaseapp.com') ||
+        urlStr.includes('googleapis.com') ||
+        urlStr.includes('googleusercontent.com') ||
+        urlStr.includes('oauth') ||
+        urlStr.includes('login')
+      );
+
+      const isExplicitPopupWindow = Boolean(
+        features && (
+          features.includes('width=') ||
+          features.includes('height=') ||
+          features.includes('popup') ||
+          features.includes('top=') ||
+          features.includes('left=') ||
+          features.includes('toolbar=0') ||
+          features.includes('location=0')
+        )
+      );
+
+      if (!urlStr || isAuthUrl || isExplicitPopupWindow) {
+        return originalOpen.call(window, url as any, target, features);
       }
-      return originalOpen.call(window, url as any, target, features);
+
+      // 2. Normal external navigation: unwrap redirect URL
+      const unwrapped = unwrapRedirectUrl(urlStr);
+      const effectiveUrl = unwrapped || urlStr;
+
+      // If Google Search, route to In-App Google Search Tab
+      if (/(?:google\.[a-z.]+\/search)|(?:^https?:\/\/(?:[a-z0-9-]+\.)*google\.[a-z.]+\/?$)/i.test(effectiveUrl)) {
+        try {
+          const u = new URL(effectiveUrl);
+          const q = u.searchParams.get('q') || '';
+          if (handleOpenInAppGoogleSearchTabRef.current) {
+            handleOpenInAppGoogleSearchTabRef.current(undefined, q);
+            return null;
+          }
+        } catch {}
+      }
+
+      openExternalPopup(effectiveUrl, 'External Link');
+      return null;
     };
     return () => {
       window.open = originalOpen;
@@ -11976,12 +12029,44 @@ export default function App() {
                 <div className="h-2 bg-[#171717]" />
 
                 {activeGTab.viewMode === 'google-frame' ? (
-                  <div className="flex-1 min-h-[540px] bg-white flex flex-col">
-                    <iframe
-                      title={`Google Search - ${activeGTab.query}`}
-                      src={`https://www.google.com/search?igu=1&q=${encodeURIComponent(activeGTab.query)}`}
-                      className="w-full flex-1 min-h-[540px] border-0"
-                    />
+                  <div className="bg-[#202124] p-8 flex flex-col items-center justify-center gap-4 text-center my-4 mx-3 rounded-2xl border border-[#3c4043]">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-[#8ab4f8]">
+                      <Search size={28} />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-white">
+                        {lang === 'bn' ? 'গুগল লাইভ সার্চ' : 'Google Live Search'}
+                      </h4>
+                      <p className="text-xs text-[#9aa0a6] max-w-md mt-1.5 leading-relaxed">
+                        {lang === 'bn'
+                          ? 'ব্যবহারকারীর নিরাপত্তার স্বার্থে গুগল সরাসরি আইফ্রেমে লোড ব্লক করে (Google 403 Error প্রতিরোধ)। নিচের বোতাম দিয়ে সরাসরি ব্রাউজারে গুগল ফলাফল দেখুন অথবা "সার্চ ভিউ" ব্যবহার করুন।'
+                          : 'Google disallows iframe embedding to prevent 403 errors. Use the button below to view search results directly on Google, or switch back to "Search View".'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                      <a
+                        href={`https://www.google.com/search?q=${encodeURIComponent(activeGTab.query)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-allow-external="true"
+                        className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 no-underline shadow-lg shadow-blue-500/30 cursor-pointer active:scale-95 transition-all"
+                      >
+                        <Search size={14} />
+                        <span>{lang === 'bn' ? 'ব্রাউজারে গুগলে দেখুন' : 'Search on Google'}</span>
+                        <ExternalLink size={13} />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInAppGoogleTabs(prev =>
+                            prev.map(t => (t.tabId === activeGTab.tabId ? { ...t, viewMode: 'results' } : t))
+                          )
+                        }
+                        className="px-4 py-2.5 rounded-xl bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] font-bold text-xs cursor-pointer transition-all"
+                      >
+                        {lang === 'bn' ? 'সার্চ ভিউতে ফিরুন' : 'Back to Search View'}
+                      </button>
+                    </div>
                   </div>
                 ) : activeGTab.isLoading ? (
                   <div className="bg-[#202124] py-16 px-4 flex flex-col items-center justify-center gap-3">
@@ -22453,6 +22538,23 @@ export default function App() {
         url={externalPopupUrl || ''}
         title={externalPopupTitle}
         lang={lang}
+        onSyncLiveUrl={(syncUrl) => {
+          setExternalPopupUrl(null);
+          const clean = unwrapRedirectUrl(syncUrl) || syncUrl;
+          const detectedSport = detectSportFromUrl(clean, 'cricket');
+          setMatch(prev => ({
+            ...prev,
+            sport: detectedSport,
+            liveMatchUrl: clean,
+            liveSyncEnabled: true
+          }));
+          fetchLiveMatchData(clean, true, {
+            id: currentMatchIdRef.current || matchRef.current?.id,
+            sport: detectedSport
+          });
+          goHome();
+          toast.success(lang === 'bn' ? 'ম্যাচ লাইভ সিঙ্ক শুরু হয়েছে!' : 'Match live sync started!');
+        }}
       />
     </div>
   );

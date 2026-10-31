@@ -2,6 +2,8 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithCredential,
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -227,6 +229,23 @@ export const initGoogleAuth = (
     cachedFallbackUser = stored.user as unknown as User;
   }
 
+  // Check if returning from a mobile redirect sign-in flow
+  if (typeof window !== 'undefined') {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            saveCachedAuthToStorage(result.user, credential.accessToken);
+            onAuthSuccess(result.user, credential.accessToken);
+          }
+        }
+      })
+      .catch((redirectErr) => {
+        console.warn('Firebase getRedirectResult notice:', redirectErr);
+      });
+  }
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     const activeToken = getCachedAccessToken();
     if (user && activeToken) {
@@ -238,6 +257,10 @@ export const initGoogleAuth = (
       onAuthFailure();
     }
   });
+};
+
+export const signInWithGoogleRedirect = async (): Promise<void> => {
+  await signInWithRedirect(auth, provider);
 };
 
 export const signInWithGoogle = async (): Promise<{ user: User; accessToken: string }> => {

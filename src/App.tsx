@@ -3054,73 +3054,6 @@ export default function App() {
         return nextM;
       });
 
-      // Ensure EMB vs টিম বি is always present if not already in the list
-      const hasAnyEmb = updated.some(m =>
-        String(m.name || '').toUpperCase().includes('EMB') ||
-        String(m.team1 || '').toUpperCase().includes('EMB') ||
-        String(m.team2 || '').toUpperCase().includes('EMB')
-      );
-      if (!hasAnyEmb) {
-        const embMatch: MatchState = {
-          ...createNewMatch('EMB vs টিম বি'),
-          id: 'match-emb-vs-team-b',
-          team1: 'EMB',
-          team2: 'টিম বি',
-          teams: ['EMB', 'টিম বি'],
-          sport: 'cricket',
-          format: '20',
-          maxOvers: 20,
-          isUpcoming: false,
-          isFinished: false,
-          sectionOverride: 'live',
-          matchDate: '2026-10-26',
-          matchStartTime: '26 Oct 2026, 10:30 PM',
-          matchStartTimeIso: '2026-10-26T22:30:00',
-          firstInningsScore: '183 (20.0)',
-          firstInningsTotalScore: 183,
-          team1Score: '183 (20.0)',
-          target: 184,
-          score: 17,
-          wickets: 2,
-          balls: 30,
-          team2Score: '17/2 (5.0)',
-          battingTeam: 'টিম বি',
-          bowlingTeam: 'EMB',
-          team1BattingStats: [
-            { name: 'আলি শান (Ali Shan)', runs: 54, balls: 36, fours: 6, sixes: 2, isOut: true, wicketType: 'c & b', yetToBat: false },
-            { name: 'উমাইর আলি (Umair Ali)', runs: 38, balls: 28, fours: 4, sixes: 1, isOut: true, wicketType: 'caught', yetToBat: false },
-            { name: 'ফাহাদ নওয়াজ (Fahad Nawaz)', runs: 45, balls: 24, fours: 3, sixes: 3, isOut: true, wicketType: 'bowled', yetToBat: false },
-            { name: 'সিপি রিজওয়ান (CP Rizwan)*', runs: 26, balls: 18, fours: 2, sixes: 1, isOut: false, wicketType: 'not out', yetToBat: false },
-            { name: 'বাসিল হামিদ (Basil Hameed)', runs: 12, balls: 9, fours: 1, sixes: 0, isOut: true, wicketType: 'run out', yetToBat: false },
-            { name: 'জাওয়াহির ফরিদ (Zawar Farid)*', runs: 8, balls: 5, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
-          ],
-          team2BattingStats: [
-            { name: 'ওপেনার ১ (Opener 1)', runs: 6, balls: 11, fours: 1, sixes: 0, isOut: true, wicketType: 'caught', yetToBat: false },
-            { name: 'ওপেনার ২ (Opener 2)', runs: 2, balls: 5, fours: 0, sixes: 0, isOut: true, wicketType: 'lbw', yetToBat: false },
-            { name: 'ব্যাটার ৩ (Batter 3)*', runs: 7, balls: 10, fours: 1, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
-            { name: 'ব্যাটার ৪ (Batter 4)*', runs: 2, balls: 4, fours: 0, sixes: 0, isOut: false, wicketType: 'not out', yetToBat: false },
-            { name: 'ব্যাটার ৫', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
-            { name: 'ব্যাটার ৬', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, yetToBat: true, wicketType: 'yet to bat' },
-          ],
-          team1BowlingStats: [
-            { name: 'বোলার ১ (Bowler 1)', overs: '4.0', maidens: 0, runs: 32, wickets: 2, economy: '8.00' },
-            { name: 'বোলার ২ (Bowler 2)', overs: '4.0', maidens: 0, runs: 38, wickets: 1, economy: '9.50' },
-            { name: 'বোলার ৩ (Bowler 3)', overs: '4.0', maidens: 0, runs: 41, wickets: 1, economy: '10.25' },
-            { name: 'বোলার ৪ (Bowler 4)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
-            { name: 'বোলার ৫ (Bowler 5)', overs: '4.0', maidens: 0, runs: 36, wickets: 0, economy: '9.00' },
-          ],
-          team2BowlingStats: [
-            { name: 'জুনাইদ সিদ্দিক (Junaid Siddique)', overs: '3.0', maidens: 0, runs: 9, wickets: 1, economy: '3.00' },
-            { name: 'মুহাম্মদ জাওয়াদুল্লাহ (M Jawadullah)', overs: '2.0', maidens: 0, runs: 8, wickets: 1, economy: '4.00' },
-          ],
-          activeBatsman1Idx: 2,
-          activeBatsman2Idx: 3,
-          liveStatusText: 'টিম বি এর ৯০ বলে ১৬৭ রান প্রয়োজন (ওভার প্রতি ১১.১৩, ৮ উইকেট বাকি, টার্গেট ১৮৪)'
-        };
-        updated.unshift(embMatch);
-        changed = true;
-      }
-
       return changed ? updated : prevList;
     });
 
@@ -4888,6 +4821,14 @@ export default function App() {
       const isValid = matches.some(m => m.id === currentMatchId);
       if (!isValid) {
         setCurrentMatchId(matches[0].id);
+      }
+    } else {
+      if (currentMatchId !== '') {
+        setCurrentMatchId('');
+        currentMatchIdRef.current = '';
+        try {
+          localStorage.setItem(STORAGE_KEY_CURRENT_ID, '');
+        } catch {}
       }
     }
   }, [matches, currentMatchId]);

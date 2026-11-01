@@ -16473,18 +16473,21 @@ export default function App() {
                             <span className="text-[10px] text-slate-400 uppercase font-sans">Recent:</span>
                             {match.liveRecentBalls.slice(-20).map((ball, idx) => {
                               const rawB = String(ball || '').trim();
-                              const dispB = (rawB === '0' || rawB === '•') ? '.' : (/^nb/i.test(rawB) && !rawB.includes('🔥') ? `${rawB}🔥` : rawB);
+                              const dispB = (rawB === '0' || rawB === '•' || rawB === '.' || rawB === '') ? '0' : (/^nb/i.test(rawB) && !rawB.includes('🔥') ? `${rawB}🔥` : rawB);
                               const isWkt = /^(?:W|C|B|LBW|R)(?:\+\d+)?$/i.test(rawB);
                               const isFire = /^nb/i.test(rawB) || rawB.includes('🔥') || /free\s*hit/i.test(rawB);
+                              const isSix = dispB === '6';
+                              const isFour = dispB === '4';
                               return (
                                 <span
                                   key={idx}
                                   className={cn(
-                                    "min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center text-[10px] font-bold font-mono",
-                                    isWkt ? "bg-red-600 text-white border border-red-400 font-black" :
-                                    isFire ? "bg-gradient-to-r from-orange-500 to-red-600 text-white border border-orange-400 font-black" :
-                                    (dispB === '4' || dispB === '6') ? "bg-amber-400 text-black font-black" :
-                                    "bg-slate-800 text-slate-200 border border-slate-700"
+                                    "min-w-[24px] h-6 px-1.5 rounded-[7px] flex items-center justify-center text-[11px] font-bold font-sans",
+                                    isSix ? "bg-[#FA5A2A] text-white font-black" :
+                                    isFour ? "bg-[#2563EB] text-white font-black" :
+                                    isWkt ? "bg-[#DC2626] text-white font-black" :
+                                    isFire ? "bg-gradient-to-r from-orange-500 to-red-600 text-white font-black" :
+                                    "bg-white dark:bg-[#1a2234] text-black dark:text-white border-[1.5px] border-black/80 dark:border-slate-500 font-bold"
                                   )}
                                 >
                                   {dispB}
@@ -22419,19 +22422,27 @@ export default function App() {
                     {!isUpcomingMatch && match.liveRecentBalls && match.liveRecentBalls.length > 0 && (
                       <div className="flex items-center gap-1.5 pt-1">
                         <span className="text-[10px] text-slate-400 uppercase font-sans">Recent:</span>
-                        {match.liveRecentBalls.slice(-20).map((ball, idx) => (
-                          <span
-                            key={idx}
-                            className={cn(
-                              "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono",
-                              ball === 'W' ? "bg-red-600 text-white" :
-                              (ball === '4' || ball === '6') ? "bg-amber-400 text-black font-black" :
-                              "bg-slate-800 text-slate-200 border border-slate-700"
-                            )}
-                          >
-                            {ball}
-                          </span>
-                        ))}
+                        {match.liveRecentBalls.slice(-20).map((ball, idx) => {
+                          const rawB = String(ball || '').trim();
+                          const dispB = (rawB === '0' || rawB === '•' || rawB === '.' || rawB === '') ? '0' : rawB;
+                          const isSix = dispB === '6';
+                          const isFour = dispB === '4';
+                          const isWkt = /^(?:W|C|B|LBW|R)(?:\+\d+)?$/i.test(rawB);
+                          return (
+                            <span
+                              key={idx}
+                              className={cn(
+                                "min-w-[24px] h-6 px-1.5 rounded-[7px] flex items-center justify-center text-[11px] font-bold font-sans",
+                                isSix ? "bg-[#FA5A2A] text-white font-black" :
+                                isFour ? "bg-[#2563EB] text-white font-black" :
+                                isWkt ? "bg-[#DC2626] text-white font-black" :
+                                "bg-white dark:bg-[#1a2234] text-black dark:text-white border-[1.5px] border-black/80 dark:border-slate-500 font-bold"
+                              )}
+                            >
+                              {dispB}
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

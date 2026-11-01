@@ -26,6 +26,7 @@ import {
 import { toast } from 'sonner';
 import { MatchState, PlayerStats, BowlerStats, getShortTeamName } from '../types';
 import { formatMatchDateTimeDisplay, MatchCountdownBadge, toBengaliDigits } from './MatchCountdown';
+import { cn } from '@/lib/utils';
 
 interface CricketMatchArenaProps {
   match: MatchState;
@@ -1171,6 +1172,48 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       ? match.liveRecentBalls[match.liveRecentBalls.length - 1]
       : undefined;
 
+  const getOrdinalOver = (num: number): string => {
+    const j = num % 10;
+    const k = num % 100;
+    if (j === 1 && k !== 11) return `${num}st`;
+    if (j === 2 && k !== 12) return `${num}nd`;
+    if (j === 3 && k !== 13) return `${num}rd`;
+    return `${num}th`;
+  };
+
+  // Modern clean squircle ball badge matching the exact design:
+  // [1] [0] as clean light squircle with black border, [6] as solid vivid coral/orange squircle
+  const renderRecentBallBadge = (b: any, key: string | number) => {
+    const rawB = safeStr(b, '0').trim();
+    let disp = rawB === '.' || rawB === '•' || rawB === '' ? '0' : rawB;
+    if (disp === '0') disp = '0';
+
+    const isSix = disp === '6';
+    const isFour = disp === '4';
+    const isWkt = /^(?:W|C|B|LBW|R(?:\+\d+)?|W(?:\+\d+)?|Wkt|Wickets|Caught|Bowled|Run Out|Stumped)$/i.test(disp);
+    const isExtra = /^WD(?:\+\d+)?$/i.test(disp) || /^NB(?:\+\d+)?/i.test(disp) || disp.includes('🔥');
+
+    return (
+      <div
+        key={key}
+        className={cn(
+          "w-8 h-8 sm:w-9 sm:h-9 rounded-[10px] flex items-center justify-center font-bold font-sans text-xs sm:text-sm shrink-0 select-none shadow-xs transition-transform",
+          isSix
+            ? "bg-[#FA5A2A] text-white font-black border-0"
+            : isFour
+            ? "bg-[#2563EB] text-white font-black border-0"
+            : isWkt
+            ? "bg-[#DC2626] text-white font-black border-0"
+            : isExtra
+            ? "bg-amber-500/20 text-amber-300 border border-amber-500/60 font-black text-[11px]"
+            : "bg-white dark:bg-[#1a2234] text-black dark:text-white border-[1.5px] border-black/90 dark:border-slate-500"
+        )}
+      >
+        {disp}
+      </div>
+    );
+  };
+
   // Render an individual ball badge according to color & styling specs
   const renderBallBadge = (b: any, key: string | number) => {
     const rawB = safeStr(b, '.');
@@ -1255,18 +1298,20 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       if (len >= 2) {
         const prevOvData = liveOvers[len - 2];
         const curOvData = liveOvers[len - 1];
+        // Ongoing/Current over first on the left (e.g. 13th)
         res.push({
-          overNumber: Math.max(1, ongoingCurrentOverNum - 1),
-          balls: prevOvData.balls.map(s => {
+          overNumber: ongoingCurrentOverNum,
+          balls: curOvData.balls.map(s => {
             const sym = formatBallSymbolToCallout(s) || s;
             return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
           }),
           runs: 0,
           wickets: 0
         });
+        // Previous completed over second on the right (e.g. 12th)
         res.push({
-          overNumber: ongoingCurrentOverNum,
-          balls: curOvData.balls.map(s => {
+          overNumber: Math.max(1, ongoingCurrentOverNum - 1),
+          balls: prevOvData.balls.map(s => {
             const sym = formatBallSymbolToCallout(s) || s;
             return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
           }),
@@ -1369,13 +1414,13 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
         wickets: 0
       });
     } else {
-      // Show previous completed over and current ongoing over
+      // Show current ongoing over on the left (e.g. 13th), then previous completed over on the right (e.g. 12th)
       const prevChunk = chunks[chunks.length - 2];
       const curChunk = chunks[chunks.length - 1];
 
       resultOvers.push({
-        overNumber: Math.max(1, ongoingCurrentOverNum - 1),
-        balls: prevChunk.map(s => ({
+        overNumber: ongoingCurrentOverNum,
+        balls: curChunk.map(s => ({
           symbol: s,
           isExtra: isRebowledExtra(s),
           isWicket: isWktSym(s),
@@ -1386,8 +1431,8 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       });
 
       resultOvers.push({
-        overNumber: ongoingCurrentOverNum,
-        balls: curChunk.map(s => ({
+        overNumber: Math.max(1, ongoingCurrentOverNum - 1),
+        balls: prevChunk.map(s => ({
           symbol: s,
           isExtra: isRebowledExtra(s),
           isWicket: isWktSym(s),
@@ -1700,7 +1745,11 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                 />
               ) : (
                 <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
-                  <span
+                  <motion.span
+                    key={`t1-score-${t1ScoreParts.mainScore}`}
+                    initial={{ scale: 1.18, color: '#34d399' }}
+                    animate={{ scale: 1, color: '#ffffff' }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 26 }}
                     onClick={() => {
                       if (!isT2Batting && !isUpcomingMatch) {
                         onEditTeamScore();
@@ -1709,7 +1758,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                         setEditingTeamScoreSide('team1');
                       }
                     }}
-                    className={`font-mono font-black tracking-tight cursor-pointer transition-colors ${
+                    className={`font-mono font-black tracking-tight cursor-pointer transition-colors inline-block origin-left ${
                       isTeam1YetToBat
                         ? 'text-xs sm:text-sm text-slate-400 hover:text-emerald-300'
                         : 'text-base sm:text-2xl text-white hover:text-emerald-300'
@@ -1717,7 +1766,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                     title={lang === 'bn' ? `${cleanT1} এর স্কোর এডিট করতে ক্লিক করুন` : `Click to edit ${cleanT1} score`}
                   >
                     {isTeam1YetToBat ? (lang === 'bn' ? 'Yet to bat' : 'Yet to bat') : t1ScoreParts.mainScore}
-                  </span>
+                  </motion.span>
                   {!isTeam1YetToBat && t1ScoreParts.oversPart && (
                     <span
                       onClick={() => {
@@ -1858,7 +1907,11 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                 />
               ) : (
                 <div className="flex items-baseline justify-end gap-1.5 mt-0.5 flex-wrap">
-                  <span
+                  <motion.span
+                    key={`t2-score-${t2ScoreParts.mainScore}`}
+                    initial={{ scale: 1.18, color: '#22d3ee' }}
+                    animate={{ scale: 1, color: '#ffffff' }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 26 }}
                     onClick={() => {
                       if (isT2Batting && !isUpcomingMatch) {
                         onEditTeamScore();
@@ -1867,7 +1920,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                         setEditingTeamScoreSide('team2');
                       }
                     }}
-                    className={`font-mono font-black tracking-tight cursor-pointer transition-colors ${
+                    className={`font-mono font-black tracking-tight cursor-pointer transition-colors inline-block origin-right ${
                       isTeam2YetToBat
                         ? 'text-xs sm:text-sm text-slate-400 hover:text-cyan-300'
                         : 'text-base sm:text-2xl text-white hover:text-cyan-300'
@@ -1875,7 +1928,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                     title={lang === 'bn' ? `${cleanT2} এর স্কোর এডিট করতে ক্লিক করুন` : `Click to edit ${cleanT2} score`}
                   >
                     {isTeam2YetToBat ? (lang === 'bn' ? 'Yet to bat' : 'Yet to bat') : t2ScoreParts.mainScore}
-                  </span>
+                  </motion.span>
                   {!isTeam2YetToBat && t2ScoreParts.oversPart && (
                     <span
                       onClick={() => {
@@ -2130,31 +2183,25 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
           </div>
 
           {/* ====================================================================
-              RECENT TWO OVERS BAR (অতিরিক্ত বল সহ পুরো দুই ওভার)
+              RECENT OVERS BAR (এক্স্যাক্ট ডিজাইন: 13th [ 1 ] [ 1 ] [ 0 ] [ 0 ] [ 0 ] | 12th [ 6 ] [ 0 ] [ 0 ])
               ==================================================================== */}
           {!isUpcomingMatch && recentTwoOvers.length > 0 && (
-            <div className="p-2 sm:p-2.5 rounded-2xl bg-slate-950/85 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-mono shadow-inner">
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                <span className="text-[10px] sm:text-xs font-black uppercase text-emerald-300 tracking-wider">
-                  {lang === 'bn' ? 'সাম্প্রতিক দুই ওভার (অতিরিক্ত বল সহ)' : 'Recent 2 Overs (With Extras)'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-                {recentTwoOvers.map((ov, ovIdx) => (
-                  <div key={`recent-over-${ov.overNumber}-${ovIdx}`} className="flex items-center gap-1 shrink-0">
-                    <span className="px-1.5 py-0.5 rounded-md bg-white/[0.08] border border-white/15 text-[9px] sm:text-[10px] font-black text-slate-300">
-                      {lang === 'bn' ? `ওভার ${toBengaliDigits(ov.overNumber)}` : `Ov ${ov.overNumber}`}
+            <div className="p-2 sm:p-2.5 rounded-2xl bg-[#f2f3f5] dark:bg-[#111625] border border-slate-300/80 dark:border-slate-800/80 flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar shadow-xs">
+              {recentTwoOvers.map((ov, ovIdx) => (
+                <React.Fragment key={`recent-over-${ov.overNumber}-${ovIdx}`}>
+                  <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+                    <span className="text-sm sm:text-base font-semibold text-slate-800 dark:text-slate-200 select-none shrink-0 tracking-tight">
+                      {getOrdinalOver(ov.overNumber)}
                     </span>
-                    <div className="flex items-center gap-1">
-                      {ov.balls.map((b, bIdx) => renderBallBadge(b.symbol, `${ov.overNumber}-${bIdx}`))}
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      {ov.balls.map((b, bIdx) => renderRecentBallBadge(b.symbol, `${ov.overNumber}-${bIdx}`))}
                     </div>
-                    {ovIdx === 0 && recentTwoOvers.length > 1 && (
-                      <div className="h-4 w-[1.5px] bg-white/20 mx-1 shrink-0" />
-                    )}
                   </div>
-                ))}
-              </div>
+                  {ovIdx < recentTwoOvers.length - 1 && (
+                    <div className="h-6 w-[1.5px] bg-slate-900 dark:bg-white/40 mx-2.5 sm:mx-3 shrink-0 self-center" />
+                  )}
+                </React.Fragment>
+              ))}
             </div>
           )}
 
@@ -2173,11 +2220,15 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
               </span>
             </button>
 
-            {/* Fallback compact pill display if recentTwoOvers is empty but liveRecentBalls exists */}
+            {/* Fallback compact display if recentTwoOvers is empty but liveRecentBalls exists */}
             {recentTwoOvers.length === 0 && match.liveRecentBalls && match.liveRecentBalls.length > 0 && (
-              <div className="flex items-center gap-1 font-mono overflow-x-auto no-scrollbar">
-                <span className="text-[9px] text-slate-400 uppercase font-bold">Recent:</span>
-                {match.liveRecentBalls.slice(-14).map((b, i) => renderBallBadge(b, i))}
+              <div className="flex items-center gap-2 font-sans overflow-x-auto no-scrollbar py-1">
+                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                  {getOrdinalOver(Math.floor(match.balls / (ballsPerOver || 6)) + ((match.balls % (ballsPerOver || 6)) > 0 ? 1 : 0) || 1)}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {match.liveRecentBalls.slice(-6).map((b, i) => renderRecentBallBadge(b, i))}
+                </div>
               </div>
             )}
           </div>

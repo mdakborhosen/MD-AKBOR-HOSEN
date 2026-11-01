@@ -1298,20 +1298,20 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       if (len >= 2) {
         const prevOvData = liveOvers[len - 2];
         const curOvData = liveOvers[len - 1];
-        // Ongoing/Current over first on the left (e.g. 13th)
+        // Ongoing/Current over first on the left (e.g. 13th), with latest ball on the left
         res.push({
           overNumber: ongoingCurrentOverNum,
-          balls: curOvData.balls.map(s => {
+          balls: [...curOvData.balls].reverse().map(s => {
             const sym = formatBallSymbolToCallout(s) || s;
             return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
           }),
           runs: 0,
           wickets: 0
         });
-        // Previous completed over second on the right (e.g. 12th)
+        // Previous completed over second on the right (e.g. 12th), with latest ball on the left
         res.push({
           overNumber: Math.max(1, ongoingCurrentOverNum - 1),
-          balls: prevOvData.balls.map(s => {
+          balls: [...prevOvData.balls].reverse().map(s => {
             const sym = formatBallSymbolToCallout(s) || s;
             return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
           }),
@@ -1323,7 +1323,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
         const curOvData = liveOvers[0];
         res.push({
           overNumber: ongoingCurrentOverNum,
-          balls: curOvData.balls.map(s => {
+          balls: [...curOvData.balls].reverse().map(s => {
             const sym = formatBallSymbolToCallout(s) || s;
             return { symbol: sym, isExtra: isRebowledExtra(sym), isWicket: isWktSym(sym), runs: 0 };
           }),
@@ -1400,11 +1400,11 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
     const resultOvers: OverItem[] = [];
 
     if (maxAllowedOvers <= 1 || chunks.length === 1) {
-      // Show only current over
+      // Show only current over, with latest ball on the left
       const latestChunk = chunks[chunks.length - 1];
       resultOvers.push({
         overNumber: ongoingCurrentOverNum,
-        balls: latestChunk.map(s => ({
+        balls: [...latestChunk].reverse().map(s => ({
           symbol: s,
           isExtra: isRebowledExtra(s),
           isWicket: isWktSym(s),
@@ -1415,12 +1415,13 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
       });
     } else {
       // Show current ongoing over on the left (e.g. 13th), then previous completed over on the right (e.g. 12th)
+      // Within each over, the newest ball is positioned on the left side
       const prevChunk = chunks[chunks.length - 2];
       const curChunk = chunks[chunks.length - 1];
 
       resultOvers.push({
         overNumber: ongoingCurrentOverNum,
-        balls: curChunk.map(s => ({
+        balls: [...curChunk].reverse().map(s => ({
           symbol: s,
           isExtra: isRebowledExtra(s),
           isWicket: isWktSym(s),
@@ -1432,7 +1433,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
 
       resultOvers.push({
         overNumber: Math.max(1, ongoingCurrentOverNum - 1),
-        balls: prevChunk.map(s => ({
+        balls: [...prevChunk].reverse().map(s => ({
           symbol: s,
           isExtra: isRebowledExtra(s),
           isWicket: isWktSym(s),
@@ -2227,7 +2228,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                   {getOrdinalOver(Math.floor(match.balls / (ballsPerOver || 6)) + ((match.balls % (ballsPerOver || 6)) > 0 ? 1 : 0) || 1)}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {match.liveRecentBalls.slice(-6).map((b, i) => renderRecentBallBadge(b, i))}
+                  {[...match.liveRecentBalls.slice(-6)].reverse().map((b, i) => renderRecentBallBadge(b, i))}
                 </div>
               </div>
             )}

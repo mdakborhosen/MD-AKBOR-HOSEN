@@ -55,6 +55,8 @@ try {
   DATA_DIR = "/tmp";
 }
 const BACKUP_FILE = path.join(DATA_DIR, "cricket_backup.json");
+const ADMIN_DEFAULT_MATCHES_FILE = path.join(DATA_DIR, "admin_default_matches.json");
+const ADMIN_DEFAULT_SERIES_FILE = path.join(DATA_DIR, "admin_default_series.json");
 
 // In-memory demo match simulators for interactive testing
 const demoMatches: Record<string, any> = {
@@ -6087,6 +6089,317 @@ Return ONLY valid JSON array with 2 objects matching:
       return res.json({ success: true, files: dailyFiles });
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to list daily backups: " + err?.message });
+    }
+  });
+
+  // ===========================================================================
+  // ADMIN DEFAULTS API: Persistent Default Matches & Series (Protected against user deletion)
+  // ===========================================================================
+  const INITIAL_SEED_SERIES = [
+    {
+      id: "series-asia-cup-2026",
+      name: "Asia Cup 2026",
+      sport: "cricket",
+      format: "T20",
+      year: "2026",
+      teams: ["Bangladesh", "India", "Pakistan", "Sri Lanka", "Afghanistan"],
+      status: "Active",
+      isDefaultSeries: true,
+      isSystemLocked: true,
+      createdRole: "admin"
+    },
+    {
+      id: "series-bpl-2026",
+      name: "Bangladesh Premier League (BPL) 2026",
+      sport: "cricket",
+      format: "T20",
+      year: "2026",
+      teams: ["Fortune Barishal", "Comilla Victorians", "Rangpur Riders", "Sylhet Strikers", "Dhaka Dominators"],
+      status: "Active",
+      isDefaultSeries: true,
+      isSystemLocked: true,
+      createdRole: "admin"
+    },
+    {
+      id: "series-ucl-2026",
+      name: "UEFA Champions League 2025/26",
+      sport: "football",
+      format: "League",
+      year: "2026",
+      teams: ["Real Madrid", "Barcelona", "Arsenal", "Manchester City", "Bayern Munich"],
+      status: "Active",
+      isDefaultSeries: true,
+      isSystemLocked: true,
+      createdRole: "admin"
+    }
+  ];
+
+  const getInitialSeedMatches = () => {
+    const nextMatchIso = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+    const tomorrowIso = new Date(Date.now() + 20 * 3600 * 1000).toISOString();
+    return [
+      {
+        id: "default-ban-ind-t20",
+        name: "Bangladesh vs India",
+        sport: "cricket",
+        team1: "Bangladesh",
+        team2: "India",
+        format: "20",
+        maxOvers: 20,
+        score: 0,
+        wickets: 0,
+        balls: 0,
+        isUpcoming: true,
+        sectionOverride: "upcoming",
+        seriesId: "series-asia-cup-2026",
+        seriesName: "Asia Cup 2026",
+        venue: "Shere Bangla National Stadium, Mirpur",
+        matchStartTime: "আজ সন্ধ্যা ৭:৩০ মি.",
+        matchStartTimeIso: nextMatchIso,
+        liveMatchUrl: "demo://ban-vs-ind",
+        isDefaultMatch: true,
+        isSystemLocked: true,
+        createdRole: "admin"
+      },
+      {
+        id: "default-barishal-rangpur-bpl",
+        name: "Fortune Barishal vs Rangpur Riders",
+        sport: "cricket",
+        team1: "Fortune Barishal",
+        team2: "Rangpur Riders",
+        format: "20",
+        maxOvers: 20,
+        score: 0,
+        wickets: 0,
+        balls: 0,
+        isUpcoming: true,
+        sectionOverride: "upcoming",
+        seriesId: "series-bpl-2026",
+        seriesName: "Bangladesh Premier League (BPL) 2026",
+        venue: "Zahur Ahmed Chowdhury Stadium, Chattogram",
+        matchStartTime: "আগামীকাল দুপুর ১:৩০ মি.",
+        matchStartTimeIso: tomorrowIso,
+        liveMatchUrl: "demo://bpl-final",
+        isDefaultMatch: true,
+        isSystemLocked: true,
+        createdRole: "admin"
+      },
+      {
+        id: "default-real-madrid-barcelona",
+        name: "Real Madrid vs Barcelona",
+        sport: "football",
+        team1: "Real Madrid",
+        team2: "Barcelona",
+        footballScore1: 0,
+        footballScore2: 0,
+        footballMinute: "Upcoming",
+        footballPeriod: "Not started",
+        isUpcoming: true,
+        sectionOverride: "upcoming",
+        seriesId: "series-ucl-2026",
+        seriesName: "UEFA Champions League 2025/26",
+        venue: "Santiago Bernabéu",
+        matchStartTime: "আজ রাত ১:০০ মি.",
+        matchStartTimeIso: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
+        liveMatchUrl: "sofascore://real-madrid-vs-barcelona",
+        isDefaultMatch: true,
+        isSystemLocked: true,
+        createdRole: "admin"
+      }
+    ];
+  };
+
+  async function loadAdminDefaultMatches(): Promise<any[]> {
+    try {
+      if (fs.existsSync(ADMIN_DEFAULT_MATCHES_FILE)) {
+        const raw = await fs.promises.readFile(ADMIN_DEFAULT_MATCHES_FILE, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch {}
+    const seeds = getInitialSeedMatches();
+    try {
+      await fs.promises.writeFile(ADMIN_DEFAULT_MATCHES_FILE, JSON.stringify(seeds, null, 2), "utf-8");
+    } catch {}
+    return seeds;
+  }
+
+  async function saveAdminDefaultMatches(matches: any[]): Promise<void> {
+    const enriched = matches.map(m => ({
+      ...m,
+      isDefaultMatch: true,
+      isSystemLocked: true,
+      createdRole: "admin",
+      lastAdminUpdated: new Date().toISOString()
+    }));
+    await fs.promises.writeFile(ADMIN_DEFAULT_MATCHES_FILE, JSON.stringify(enriched, null, 2), "utf-8");
+  }
+
+  async function loadAdminDefaultSeries(): Promise<any[]> {
+    try {
+      if (fs.existsSync(ADMIN_DEFAULT_SERIES_FILE)) {
+        const raw = await fs.promises.readFile(ADMIN_DEFAULT_SERIES_FILE, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch {}
+    try {
+      await fs.promises.writeFile(ADMIN_DEFAULT_SERIES_FILE, JSON.stringify(INITIAL_SEED_SERIES, null, 2), "utf-8");
+    } catch {}
+    return INITIAL_SEED_SERIES;
+  }
+
+  async function saveAdminDefaultSeries(seriesList: any[]): Promise<void> {
+    const enriched = seriesList.map(s => ({
+      ...s,
+      isDefaultSeries: true,
+      isSystemLocked: true,
+      createdRole: "admin",
+      lastAdminUpdated: new Date().toISOString()
+    }));
+    await fs.promises.writeFile(ADMIN_DEFAULT_SERIES_FILE, JSON.stringify(enriched, null, 2), "utf-8");
+  }
+
+  // GET all admin defaults (matches & series)
+  app.get("/api/admin/defaults", async (_req, res) => {
+    try {
+      const [matches, series] = await Promise.all([
+        loadAdminDefaultMatches(),
+        loadAdminDefaultSeries()
+      ]);
+      return res.json({
+        success: true,
+        matches,
+        series,
+        timestamp: Date.now()
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to load admin defaults: " + err?.message });
+    }
+  });
+
+  // POST add / update default match
+  app.post("/api/admin/default-matches", async (req, res) => {
+    try {
+      const currentList = await loadAdminDefaultMatches();
+      const payload = req.body;
+      if (!payload) {
+        return res.status(400).json({ error: "Match payload is required" });
+      }
+
+      let updatedList: any[];
+      if (Array.isArray(payload.matches)) {
+        updatedList = payload.matches;
+      } else {
+        const target = payload.match || payload;
+        if (!target.name && !target.team1) {
+          return res.status(400).json({ error: "Invalid match data" });
+        }
+        const matchId = target.id || `default-match-${Date.now()}`;
+        const finalMatch = {
+          ...target,
+          id: matchId,
+          isDefaultMatch: true,
+          isSystemLocked: true,
+          createdRole: "admin"
+        };
+        const existingIdx = currentList.findIndex(m => m.id === matchId);
+        if (existingIdx >= 0) {
+          currentList[existingIdx] = finalMatch;
+          updatedList = currentList;
+        } else {
+          updatedList = [finalMatch, ...currentList];
+        }
+      }
+
+      await saveAdminDefaultMatches(updatedList);
+      return res.json({ success: true, count: updatedList.length, matches: updatedList });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to save default match: " + err?.message });
+    }
+  });
+
+  // DELETE remove default match
+  app.delete("/api/admin/default-matches/:id", async (req, res) => {
+    try {
+      const matchId = req.params.id;
+      const currentList = await loadAdminDefaultMatches();
+      const updatedList = currentList.filter(m => m.id !== matchId);
+      await saveAdminDefaultMatches(updatedList);
+      return res.json({ success: true, removedId: matchId, count: updatedList.length, matches: updatedList });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to delete default match: " + err?.message });
+    }
+  });
+
+  // POST add / update default series
+  app.post("/api/admin/default-series", async (req, res) => {
+    try {
+      const currentList = await loadAdminDefaultSeries();
+      const payload = req.body;
+      if (!payload) {
+        return res.status(400).json({ error: "Series payload is required" });
+      }
+
+      let updatedList: any[];
+      if (Array.isArray(payload.seriesList)) {
+        updatedList = payload.seriesList;
+      } else {
+        const target = payload.series || payload;
+        if (!target.name) {
+          return res.status(400).json({ error: "Series name is required" });
+        }
+        const seriesId = target.id || `series-${Date.now()}`;
+        const finalSeries = {
+          ...target,
+          id: seriesId,
+          isDefaultSeries: true,
+          isSystemLocked: true,
+          createdRole: "admin"
+        };
+        const existingIdx = currentList.findIndex(s => s.id === seriesId);
+        if (existingIdx >= 0) {
+          currentList[existingIdx] = finalSeries;
+          updatedList = currentList;
+        } else {
+          updatedList = [finalSeries, ...currentList];
+        }
+      }
+
+      await saveAdminDefaultSeries(updatedList);
+      return res.json({ success: true, count: updatedList.length, series: updatedList });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to save default series: " + err?.message });
+    }
+  });
+
+  // DELETE remove default series
+  app.delete("/api/admin/default-series/:id", async (req, res) => {
+    try {
+      const seriesId = req.params.id;
+      const currentList = await loadAdminDefaultSeries();
+      const updatedList = currentList.filter(s => s.id !== seriesId);
+      await saveAdminDefaultSeries(updatedList);
+      return res.json({ success: true, removedId: seriesId, count: updatedList.length, series: updatedList });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to delete default series: " + err?.message });
+    }
+  });
+
+  // POST seed defaults
+  app.post("/api/admin/seed-defaults", async (_req, res) => {
+    try {
+      const seeds = getInitialSeedMatches();
+      await saveAdminDefaultMatches(seeds);
+      await saveAdminDefaultSeries(INITIAL_SEED_SERIES);
+      return res.json({
+        success: true,
+        message: "Defaults seeded successfully",
+        matches: seeds,
+        series: INITIAL_SEED_SERIES
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to seed defaults: " + err?.message });
     }
   });
 

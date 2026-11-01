@@ -180,6 +180,13 @@ export type MatchState = {
   footballStats?: FootballStats;
   footballVenue?: string;
   footballReferee?: string;
+  // Admin App & Default System fields:
+  isDefaultMatch?: boolean;
+  isSystemLocked?: boolean;
+  createdRole?: 'admin' | 'user';
+  seriesId?: string;
+  seriesName?: string;
+  seriesTournament?: string;
 };
 
 export type Match = MatchState;

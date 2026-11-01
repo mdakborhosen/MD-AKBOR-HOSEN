@@ -134,6 +134,7 @@ import { GoogleDriveBackupModal } from './components/GoogleDriveBackupModal';
 import { PagesDevSyncModal } from './components/PagesDevSyncModal';
 import { decodeSyncBundle } from './lib/syncExportImport';
 import { ExternalLinkPopupModal } from './components/ExternalLinkPopupModal';
+import { AdminAppModal } from './components/AdminAppModal';
 import { fetchLiveMatchDirectClient } from './lib/clientLiveMatchSync';
 import { CricketAppStateBackup, uploadBackupToGoogleDrive, getDailyBackupFileName, getTodayDateKey } from './lib/googleDrive';
 import { getCachedAccessToken, signInWithGoogle } from './lib/googleCalendar';
@@ -5246,6 +5247,64 @@ export default function App() {
       loadSportsNews();
     }
   }, [isGoogleSearchModalOpen, loadSportsNews]);
+
+  // Admin App Modal State
+  const [isAdminAppOpen, setIsAdminAppOpen] = useState(false);
+
+  // Admin Defaults Sync from Server (Loads default matches & series, preventing empty screen upon refresh)
+  const loadAdminDefaultsFromServer = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/defaults');
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.matches) && data.matches.length > 0) {
+        setMatches(prev => {
+          const currentIds = new Set(prev.map(m => m.id));
+          const toAdd: MatchState[] = [];
+          const updated = prev.map(m => {
+            const defM = data.matches.find((dm: any) => dm.id === m.id);
+            if (defM) {
+              return {
+                ...m,
+                isDefaultMatch: true,
+                isSystemLocked: true,
+                seriesId: defM.seriesId || m.seriesId,
+                seriesName: defM.seriesName || m.seriesName
+              };
+            }
+            return m;
+          });
+
+          for (const dm of data.matches) {
+            if (!currentIds.has(dm.id)) {
+              toAdd.push({
+                ...dm,
+                isDefaultMatch: true,
+                isSystemLocked: true
+              });
+            }
+          }
+
+          if (toAdd.length === 0 && updated.every((m, i) => m === prev[i])) {
+            return prev;
+          }
+
+          const merged = [...updated, ...toAdd];
+          matchesRef.current = merged;
+          try {
+            localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load admin defaults from server:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAdminDefaultsFromServer();
+  }, [loadAdminDefaultsFromServer]);
+
   const [isLiveMatchModalOpen, setIsLiveMatchModalOpen] = createSubPageStateTuple('live-link');
   const [emptyStateTab, setEmptyStateTab] = useState<'create' | 'news'>('create');
   const [isStartTimeEditorOpen, setIsStartTimeEditorOpen] = createSubPageStateTuple('countdown');
@@ -9587,6 +9646,16 @@ export default function App() {
       return;
     }
 
+    const targetMatch = (matchesRef.current || []).find(m => m.id === id);
+    if (targetMatch && (targetMatch.isDefaultMatch || targetMatch.isSystemLocked)) {
+      toast.error(
+        lang === 'bn'
+          ? '🛡️ এটি অ্যাডমিন ডিফল্ট ম্যাচ! সাধারণ ইউজাররা এটি ডিলিট করতে পারবেন না। অ্যাডমিন প্যানেল থেকে এটি পরিচালনা করুন।'
+          : '🛡️ This is an Admin Default match! Regular users cannot delete it. Manage it from Admin Console.'
+      );
+      return;
+    }
+
     deletedMatchIdsRef.current.add(id);
     const targetToSync = (matchesRef.current || []).find(m => m.id === id);
     if (targetToSync) {
@@ -9624,8 +9693,14 @@ export default function App() {
         if (ev.linkedMatchId) linkedIds.add(ev.linkedMatchId);
       }
     }
-    const deletable = allCurrent.filter(m => !linkedIds.has(m.id));
-    const kept = allCurrent.filter(m => linkedIds.has(m.id));
+    const defaultIds = new Set<string>();
+    for (const m of allCurrent) {
+      if (m.isDefaultMatch || m.isSystemLocked) {
+        defaultIds.add(m.id);
+      }
+    }
+    const deletable = allCurrent.filter(m => !linkedIds.has(m.id) && !defaultIds.has(m.id));
+    const kept = allCurrent.filter(m => linkedIds.has(m.id) || defaultIds.has(m.id));
     deletable.forEach(m => deletedMatchIdsRef.current.add(m.id));
     matchesRef.current = kept;
     const nextCurrentId = kept[0]?.id || "";
@@ -9634,7 +9709,13 @@ export default function App() {
     setCurrentMatchId(nextCurrentId);
     localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(kept));
     localStorage.setItem(STORAGE_KEY_CURRENT_ID, nextCurrentId);
-    if (kept.length > 0) {
+    if (defaultIds.size > 0 && kept.length > 0) {
+      toast.info(
+        lang === 'bn'
+          ? `🛡️ ${defaultIds.size}টি অ্যাডমিন ডিফল্ট ম্যাচ সুরক্ষিত রাখা হয়েছে। বাকি ম্যাচগুলো ডিলিট হয়েছে।`
+          : `🛡️ ${defaultIds.size} Admin Default match(es) protected. Other matches deleted.`
+      );
+    } else if (kept.length > 0) {
       toast.info(
         lang === 'bn'
           ? `সাধারণ ম্যাচগুলো ডিলিট হয়েছে। স্লিপের লিংক থেকে তৈরি ${kept.length}টি ম্যাচ স্লিপ থেকে আনলিংক বা ডিলিট করতে হবে।`
@@ -10832,8 +10913,9 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => setIsLinksModalOpen(true)}
+                  onClick={() => setIsAdminAppOpen(true)}
                   className="py-1.5 px-2.5 rounded-xl text-xs font-black bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1 cursor-pointer"
+                  title="Admin App"
                 >
                   <Shield size={12} />
                   <span>Admin</span>
@@ -11354,9 +11436,9 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => setIsLinksModalOpen(true)}
+              onClick={() => setIsAdminAppOpen(true)}
               className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1 shrink-0 cursor-pointer transition-all"
-              title="Admin Console & Links"
+              title="Admin App (ম্যানেজ ডিফল্ট ম্যাচ ও সিরিজ)"
             >
               <Shield size={11} />
               <span>admin</span>
@@ -11604,7 +11686,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => { setIsLinksModalOpen(true); setIsUnifiedMenuOpen(false); }}
+                onClick={() => { setIsAdminAppOpen(true); setIsUnifiedMenuOpen(false); }}
                 className="p-2 rounded-xl bg-amber-950/70 hover:bg-amber-900/80 border border-amber-500/50 text-amber-300 text-[11px] font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Shield size={13} className="text-amber-400 shrink-0" />
@@ -12800,18 +12882,28 @@ export default function App() {
                                         <Share2 size={12} />
                                       </button>
                                       {!linkedMatchIdsSet.has(m.id) && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            deleteMatch(m.id);
-                                          }}
-                                          className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/40 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all active:scale-95"
-                                          title={lang === 'bn' ? "তালিকা থেকে ম্যাচটি ডিলিট করুন" : "Delete match from list"}
-                                        >
-                                          <Trash2 size={11} />
-                                          <span>{lang === 'bn' ? 'ডিলিট' : 'Delete'}</span>
-                                        </button>
+                                        m.isDefaultMatch || m.isSystemLocked ? (
+                                          <span
+                                            className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-black flex items-center gap-1 select-none"
+                                            title={lang === 'bn' ? "অ্যাডমিন ডিফল্ট ম্যাচ (সুরক্ষিত)" : "Admin Default Match (Protected)"}
+                                          >
+                                            <Shield size={11} className="text-amber-400" />
+                                            <span>{lang === 'bn' ? 'ডিফল্ট' : 'Default'}</span>
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteMatch(m.id);
+                                            }}
+                                            className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 border border-rose-500/40 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                                            title={lang === 'bn' ? "তালিকা থেকে ম্যাচটি ডিলিট করুন" : "Delete match from list"}
+                                          >
+                                            <Trash2 size={11} />
+                                            <span>{lang === 'bn' ? 'ডিলিট' : 'Delete'}</span>
+                                          </button>
+                                        )
                                       )}
                                     </div>
                                   </div>
@@ -13149,19 +13241,28 @@ export default function App() {
                                   <Share2 size={11} />
                                 </button>
 
-                                {/* Quick Delete button for this match directly from the lineup list (hidden for slip-linked matches) */}
+                                {/* Quick Delete button for this match directly from the lineup list (hidden for slip-linked matches, protected for default matches) */}
                                 {!linkedMatchIdsSet.has(m.id) && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      deleteMatch(m.id);
-                                    }}
-                                    className="w-6 h-6 rounded-lg bg-rose-500/15 hover:bg-rose-500/35 text-rose-400 hover:text-rose-200 flex items-center justify-center transition-all cursor-pointer border border-rose-500/30 shrink-0"
-                                    title={lang === 'bn' ? "তালিকা থেকে এই ম্যাচটি ডিলিট করুন" : "Delete this match from list"}
-                                  >
-                                    <Trash2 size={11} />
-                                  </button>
+                                  m.isDefaultMatch || m.isSystemLocked ? (
+                                    <span
+                                      className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/35 text-amber-400 flex items-center justify-center shrink-0 cursor-default select-none"
+                                      title={lang === 'bn' ? "অ্যাডমিন ডিফল্ট ম্যাচ (সুরক্ষিত - সাধারণ ইউজাররা ডিলিট করতে পারবে না)" : "Admin Default Match (Protected - Regular users cannot delete)"}
+                                    >
+                                      <Shield size={11} className="text-amber-400" />
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteMatch(m.id);
+                                      }}
+                                      className="w-6 h-6 rounded-lg bg-rose-500/15 hover:bg-rose-500/35 text-rose-400 hover:text-rose-200 flex items-center justify-center transition-all cursor-pointer border border-rose-500/30 shrink-0"
+                                      title={lang === 'bn' ? "তালিকা থেকে এই ম্যাচটি ডিলিট করুন" : "Delete this match from list"}
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  )
                                 )}
                               </div>
                             </div>
@@ -13656,17 +13757,26 @@ export default function App() {
                                   </a>
                                   <span>{mItem.team1} vs {mItem.team2}</span>
                                   {!linkedMatchIdsSet.has(mItem.id) && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        deleteMatch(mItem.id);
-                                      }}
-                                      className="p-0.5 rounded hover:bg-rose-500/30 text-rose-300 hover:text-white cursor-pointer"
-                                      title={lang === 'bn' ? 'ম্যাচটি ডিলিট করুন' : 'Delete match'}
-                                    >
-                                      <Trash2 size={9} />
-                                    </button>
+                                    mItem.isDefaultMatch || mItem.isSystemLocked ? (
+                                      <span
+                                        className="p-0.5 rounded text-amber-400 select-none"
+                                        title={lang === 'bn' ? 'ডিফল্ট ম্যাচ' : 'Default match'}
+                                      >
+                                        <Shield size={9} />
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          deleteMatch(mItem.id);
+                                        }}
+                                        className="p-0.5 rounded hover:bg-rose-500/30 text-rose-300 hover:text-white cursor-pointer"
+                                        title={lang === 'bn' ? 'ম্যাচটি ডিলিট করুন' : 'Delete match'}
+                                      >
+                                        <Trash2 size={9} />
+                                      </button>
+                                    )
                                   )}
                                 </div>
                               );
@@ -14012,17 +14122,26 @@ export default function App() {
                                   <span>🏁 {lang === 'bn' ? 'ফিনিশ' : 'Finish'}</span>
                                 </button>
                                 {!linkedMatchIdsSet.has(upM.id) && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      deleteMatch(upM.id);
-                                    }}
-                                    className="w-5 h-5 rounded-md bg-rose-500/15 hover:bg-rose-500 text-rose-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
-                                    title={lang === 'bn' ? 'ম্যাচ ডিলিট করুন' : 'Delete Match'}
-                                  >
-                                    <Trash2 size={10} />
-                                  </button>
+                                  upM.isDefaultMatch || upM.isSystemLocked ? (
+                                    <span
+                                      className="w-5 h-5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center select-none"
+                                      title={lang === 'bn' ? 'ডিফল্ট ম্যাচ' : 'Default Match'}
+                                    >
+                                      <Shield size={10} />
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteMatch(upM.id);
+                                      }}
+                                      className="w-5 h-5 rounded-md bg-rose-500/15 hover:bg-rose-500 text-rose-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                                      title={lang === 'bn' ? 'ম্যাচ ডিলিট করুন' : 'Delete Match'}
+                                    >
+                                      <Trash2 size={10} />
+                                    </button>
+                                  )
                                 )}
                               </div>
                             </div>
@@ -22566,6 +22685,57 @@ export default function App() {
           goHome();
           toast.success(lang === 'bn' ? 'ম্যাচ লাইভ সিঙ্ক শুরু হয়েছে!' : 'Match live sync started!');
         }}
+      />
+
+      {/* Admin App Console Modal (ম্যানেজ ডিফল্ট ম্যাচ ও সিরিজ যা সাধারণ ইউজাররা ডিলিট করতে পারবে না) */}
+      <AdminAppModal
+        isOpen={isAdminAppOpen}
+        onClose={() => setIsAdminAppOpen(false)}
+        lang={lang}
+        currentMatches={matches}
+        onAddMatchToApp={(newM) => {
+          setMatches(prev => {
+            const existingIdx = prev.findIndex(item => item.id === newM.id);
+            let updated: MatchState[];
+            if (existingIdx >= 0) {
+              updated = prev.map((item, idx) => idx === existingIdx ? { ...item, ...newM, isDefaultMatch: true, isSystemLocked: true } : item);
+            } else {
+              updated = [{ ...newM, isDefaultMatch: true, isSystemLocked: true }, ...prev];
+            }
+            matchesRef.current = updated;
+            try {
+              localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+          if (newM.id) {
+            currentMatchIdRef.current = newM.id;
+            setCurrentMatchId(newM.id);
+          }
+        }}
+        onRemoveMatchFromApp={(mId) => {
+          setMatches(prev => {
+            const updated = prev.filter(item => item.id !== mId);
+            matchesRef.current = updated;
+            try {
+              localStorage.setItem(STORAGE_KEY_MATCHES, JSON.stringify(updated));
+            } catch {}
+            if (updated.length > 0 && currentMatchIdRef.current === mId) {
+              currentMatchIdRef.current = updated[0].id;
+              setCurrentMatchId(updated[0].id);
+            }
+            return updated;
+          });
+        }}
+        onSelectMatch={(mId) => {
+          const target = matches.find(m => m.id === mId);
+          if (target) {
+            currentMatchIdRef.current = target.id;
+            setCurrentMatchId(target.id);
+            setIsAdminAppOpen(false);
+          }
+        }}
+        onRefreshDefaultsFromServer={loadAdminDefaultsFromServer}
       />
     </div>
   );

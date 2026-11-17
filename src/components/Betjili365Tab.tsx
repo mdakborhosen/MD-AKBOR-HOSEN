@@ -174,6 +174,7 @@ interface WalletTx {
 
 interface Betjili365TabProps {
   lang?: 'bn' | 'en';
+  openWebsiteNonce?: number;
   onSyncMatchToScorer: (ev: BetjiliFeedEvent) => void;
   onAddSelectionToBetSlip: (ev: BetjiliFeedEvent, selectionLabel: string, odds: number, betRuleType: string, targetValue?: number) => void;
   onSyncCustomUrl: (payload: { url: string; team1: string; team2: string; sport: 'cricket' | 'football' }) => void;
@@ -184,11 +185,14 @@ const STORAGE_TOKEN_KEY = 'betjili365_api_session_token_v1';
 
 export const Betjili365Tab: React.FC<Betjili365TabProps> = ({
   lang = 'bn',
+  openWebsiteNonce = 0,
   onSyncMatchToScorer,
   onAddSelectionToBetSlip,
   onSyncCustomUrl
 }) => {
-  const [innerTab, setInnerTab] = useState<'markets' | 'casino' | 'wallet' | 'history' | 'url-sync' | 'api'>('markets');
+  const [innerTab, setInnerTab] = useState<'website' | 'markets' | 'casino' | 'wallet' | 'history' | 'url-sync' | 'api'>('website');
+  const [browserUrl, setBrowserUrl] = useState<string>(TARGET_WEBSITE_URL);
+  const [browserFrameKey, setBrowserFrameKey] = useState<number>(1);
   const [sportFilter, setSportFilter] = useState<'all' | 'cricket' | 'football'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'live' | 'upcoming'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,6 +202,14 @@ export const Betjili365Tab: React.FC<Betjili365TabProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [expandedMatchIds, setExpandedMatchIds] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (openWebsiteNonce > 0) {
+      setInnerTab('website');
+      setBrowserUrl(TARGET_WEBSITE_URL);
+      setBrowserFrameKey((k) => k + 1);
+    }
+  }, [openWebsiteNonce]);
 
   // Auth & Account State
   const [token, setToken] = useState<string>(() => {
@@ -756,6 +768,7 @@ export const Betjili365Tab: React.FC<Betjili365TabProps> = ({
         {/* Primary Feature Tabs Navigation */}
         <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 pb-3">
           {[
+            { id: 'website', icon: <Globe size={14} />, label: 'সরাসরি ওয়েবসাইট', activeCls: 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30' },
             { id: 'markets', icon: <Activity size={14} />, label: 'স্পোর্টস ও এক্সচেঞ্জ (সব অপশন)', activeCls: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30' },
             { id: 'casino', icon: <Gamepad2 size={14} />, label: 'ক্যাসিনো ও মিনি গেমস', activeCls: 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/30' },
             { id: 'wallet', icon: <Wallet size={14} />, label: 'ওয়ালেট ও প্রমোশন', activeCls: 'bg-amber-600 text-white shadow-md shadow-amber-600/30' },
@@ -776,6 +789,198 @@ export const Betjili365Tab: React.FC<Betjili365TabProps> = ({
             </button>
           ))}
         </div>
+
+        {/* ================================================================
+            TAB 0: IN-APP BETJILI365 WEBSITE PORTAL & BROWSER LAUNCHER
+           ================================================================ */}
+        {innerTab === 'website' && (
+          <div className="rounded-2xl overflow-hidden border border-emerald-500/40 bg-slate-950 shadow-2xl flex flex-col">
+            {/* Browser Chrome & Address Bar */}
+            <div className="bg-slate-900 border-b border-slate-800 p-2.5 sm:p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-emerald-500/40 text-xs font-black text-emerald-300 shrink-0">
+                  <span>🎰</span>
+                  <span>betjili365.com/bd/bn</span>
+                </div>
+
+                <div className="flex-1 min-w-[180px] flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5">
+                  <Globe size={13} className="text-emerald-400 shrink-0" />
+                  <input
+                    type="url"
+                    value={browserUrl}
+                    onChange={(e) => setBrowserUrl(e.target.value)}
+                    className="flex-1 bg-transparent text-xs font-mono text-white outline-none min-w-0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(browserUrl || TARGET_WEBSITE_URL, 'portal-url')}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-cyan-300 hover:text-white cursor-pointer shrink-0"
+                  >
+                    {copiedKey === 'portal-url' ? 'কপি হয়েছে' : 'কপি'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBrowserUrl(TARGET_WEBSITE_URL);
+                      setBrowserFrameKey((k) => k + 1);
+                    }}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer shrink-0"
+                  >
+                    হোম
+                  </button>
+                </div>
+
+                <a
+                  href={browserUrl || TARGET_WEBSITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-allow-external="true"
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-black flex items-center gap-1.5 no-underline shadow-md shrink-0"
+                >
+                  <ExternalLink size={13} />
+                  <span>নতুন ট্যাবে খুলুন ↗</span>
+                </a>
+              </div>
+
+              {/* Quick Section URL Selector */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5">
+                {[
+                  { label: '🏠 হোম', url: 'https://betjili365.com/bd/bn' },
+                  { label: '🏏 স্পোর্টস', url: 'https://betjili365.com/bd/bn/sports' },
+                  { label: '🃏 লাইভ ক্যাসিনো', url: 'https://betjili365.com/bd/bn/casino' },
+                  { label: '🎰 স্লট', url: 'https://betjili365.com/bd/bn/slot' },
+                  { label: '✈️ ক্র্যাশ', url: 'https://betjili365.com/bd/bn/crash' },
+                  { label: '🎁 প্রমোশন', url: 'https://betjili365.com/bd/bn/promotion' },
+                  { label: '🔑 লগইন', url: 'https://betjili365.com/bd/bn/member/login' }
+                ].map((sec) => (
+                  <button
+                    key={sec.url}
+                    type="button"
+                    onClick={() => {
+                      setBrowserUrl(sec.url);
+                      setBrowserFrameKey((k) => k + 1);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all ${
+                      browserUrl === sec.url
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-950 text-slate-300 border border-slate-800 hover:border-emerald-500/40'
+                    }`}
+                  >
+                    {sec.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {feedData?.upstreamProbe?.reachable ? (
+              <iframe
+                key={`proxy-${browserFrameKey}`}
+                title="Betjili365 BD/BN Live Website"
+                src={`/api/betjili365/web-proxy?url=${encodeURIComponent(browserUrl || TARGET_WEBSITE_URL)}`}
+                className="w-full h-[520px] sm:h-[620px] border-0 bg-slate-950"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="p-4 sm:p-6 bg-gradient-to-b from-emerald-950/60 via-slate-950 to-slate-950 space-y-5">
+                {/* Main Launch Hero */}
+                <div className="p-5 rounded-2xl bg-slate-900/90 border border-emerald-500/40 text-center space-y-3 shadow-xl">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-emerald-500 to-amber-500 text-slate-950 font-black text-sm">
+                    <span>🎰</span>
+                    <span>BETJILI365 • BD/BN</span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-white">
+                    সরাসরি Betjili365.com/bd/bn ওয়েবসাইট ওপেন করুন
+                  </h3>
+                  <p className="text-xs text-slate-300 max-w-xl mx-auto leading-relaxed">
+                    <code className="text-amber-300">betjili365.com</code> তাদের সার্ভার থেকে{' '}
+                    <code className="text-rose-300">X-Frame-Options: SAMEORIGIN</code> ও Cloudflare সুরক্ষা দিয়ে রাখে—তাই কোনো অ্যাপের ভেতর সরাসরি ফ্রেম (iframe) লোড করলে ব্রাউজার ব্লক করে। নিচের বাটনে ক্লিক করে সরাসরি নতুন ট্যাবে আসল সাইটটি ওপেন করুন অথবা নিচে আমাদের অ্যাপের নিজস্ব বেটিং ও মিনি-গেম ব্যবহার করুন:
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                    <a
+                      href={browserUrl || TARGET_WEBSITE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-allow-external="true"
+                      className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-sm font-black flex items-center gap-2 no-underline shadow-lg shadow-emerald-600/30"
+                    >
+                      <ExternalLink size={16} />
+                      <span>সরাসরি নতুন ট্যাবে খুলুন ↗</span>
+                    </a>
+
+                    <a
+                      href="https://betjili365.com/bd/bn/member/login"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-allow-external="true"
+                      className="px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-black flex items-center gap-1.5 no-underline shadow-md"
+                    >
+                      <UserCheck size={15} />
+                      <span>অফিশিয়াল লগইন / সাইনআপ ↗</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Direct Website Section Cards (top-level external links) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { icon: '🏠', title: 'মূল হোমপেজ', sub: '/bd/bn', url: 'https://betjili365.com/bd/bn' },
+                    { icon: '🏏', title: 'ক্রিকেট এক্সচেঞ্জ', sub: '/bd/bn/sports', url: 'https://betjili365.com/bd/bn/sports' },
+                    { icon: '🃏', title: 'লাইভ ক্যাসিনো', sub: '/bd/bn/casino', url: 'https://betjili365.com/bd/bn/casino' },
+                    { icon: '🎰', title: 'স্লট গেমস', sub: '/bd/bn/slot', url: 'https://betjili365.com/bd/bn/slot' },
+                    { icon: '✈️', title: 'ক্র্যাশ / Aviator', sub: '/bd/bn/crash', url: 'https://betjili365.com/bd/bn/crash' },
+                    { icon: '🎣', title: 'ফিশিং গেম', sub: '/bd/bn/fishing', url: 'https://betjili365.com/bd/bn/fishing' },
+                    { icon: '🎁', title: 'প্রমোশন ও বোনাস', sub: '/bd/bn/promotion', url: 'https://betjili365.com/bd/bn/promotion' },
+                    { icon: '👑', title: 'VIP ক্লাব', sub: '/bd/bn/vip', url: 'https://betjili365.com/bd/bn/vip' }
+                  ].map((card) => (
+                    <a
+                      key={card.url}
+                      href={card.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-allow-external="true"
+                      className="p-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/50 transition-all flex items-center justify-between gap-2 no-underline group"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-lg shrink-0">{card.icon}</span>
+                        <div className="min-w-0">
+                          <div className="text-xs font-black text-white group-hover:text-emerald-300 truncate">{card.title}</div>
+                          <div className="text-[10px] font-mono text-slate-400 truncate">{card.sub}</div>
+                        </div>
+                      </div>
+                      <ExternalLink size={13} className="text-amber-400 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+
+                {/* Built-in Interactive App Features Switcher */}
+                <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-slate-300 font-bold">
+                    অথবা এই অ্যাপের ভেতরেই লাইভ স্পোর্টস অডস, এক্সচেঞ্জ বেটিং ও গেম ব্যবহার করুন:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInnerTab('markets')}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer"
+                    >
+                      <Activity size={13} />
+                      <span>স্পোর্টস ও এক্সচেঞ্জ ({events.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInnerTab('casino')}
+                      className="px-3 py-1.5 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-black flex items-center gap-1 cursor-pointer"
+                    >
+                      <Gamepad2 size={13} />
+                      <span>মিনি ক্যাসিনো ও Aviator</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ================================================================
             TAB 1: SPORTS & EXCHANGE (ALL BETTING OPTIONS)

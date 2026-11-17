@@ -6029,6 +6029,98 @@ Return ONLY valid JSON without markdown fences.`
     ];
   }
 
+  app.get("/api/betjili365/web-proxy", async (req, res) => {
+    const rawUrl = String(req.query.url || BETJILI365_BASE_URL).trim();
+    let targetUrl = BETJILI365_BASE_URL;
+    try {
+      const parsed = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
+      const host = parsed.hostname.toLowerCase();
+      if (host === "betjili365.com" || host.endsWith(".betjili365.com")) {
+        targetUrl = parsed.toString();
+      }
+    } catch {}
+
+    try {
+      const resp = await axios.get(targetUrl, {
+        timeout: 4500,
+        validateStatus: () => true,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+
+      const bodyStr = typeof resp.data === "string" ? resp.data : "";
+      const isCfBlocked = resp.status === 403 || /cloudflare|attention required|just a moment/i.test(bodyStr);
+
+      if (resp.status >= 200 && resp.status < 400 && !isCfBlocked && /<html/i.test(bodyStr)) {
+        const sanitizedHtml = bodyStr
+          .replace(/<meta[^>]*http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, "")
+          .replace(/<head[^>]*>/i, (m) => `${m}<base href="${targetUrl}" target="_blank">`);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(200).send(sanitizedHtml);
+      }
+    } catch {}
+
+    const safeEscapedUrl = targetUrl.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(`<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Betjili365 BD/BN — In-App Web Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: radial-gradient(circle at top, #064e3b 0%, #020617 62%); color: #f8fafc; min-height: 100vh; padding: 16px; }
+    .wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    .hero { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 20px; padding: 20px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.45); }
+    .logo-badge { display: inline-flex; align-items: center; gap: 10px; background: linear-gradient(135deg, #10b981, #f59e0b); color: #020617; font-weight: 900; font-size: 18px; padding: 8px 18px; border-radius: 999px; margin-bottom: 12px; }
+    h1 { margin: 6px 0; font-size: 20px; font-weight: 900; color: #ffffff; }
+    .url-pill { display: inline-block; font-family: monospace; font-size: 12px; background: #020617; border: 1px solid #334155; color: #34d399; padding: 5px 12px; border-radius: 999px; margin-bottom: 14px; word-break: break-all; }
+    p.note { font-size: 12px; color: #cbd5e1; line-height: 1.6; margin: 0 0 16px; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .btn-primary { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(90deg, #10b981, #059669); color: #ffffff; text-decoration: none; font-weight: 900; font-size: 14px; padding: 12px 24px; border-radius: 14px; border: 1px solid #34d399; box-shadow: 0 8px 25px rgba(16, 185, 129, 0.35); }
+    .btn-secondary { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(90deg, #f59e0b, #d97706); color: #020617; text-decoration: none; font-weight: 900; font-size: 13px; padding: 12px 18px; border-radius: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .cat { display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.9); border: 1px solid #1e293b; border-radius: 14px; padding: 12px 14px; text-decoration: none; color: #e2e8f0; font-weight: 800; font-size: 13px; transition: border-color .15s; }
+    .cat:hover { border-color: #10b981; color: #34d399; }
+    .cat span.tag { font-size: 11px; color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div class="logo-badge">🎰 BETJILI365 • BD/BN</div>
+      <h1>অফিশিয়াল Betjili365 ওয়েবসাইট পোর্টাল</h1>
+      <div class="url-pill">${safeEscapedUrl}</div>
+      <p class="note">
+        <strong>নিরাপত্তা নোট:</strong> <code>betjili365.com</code> Cloudflare সুরক্ষিত এবং ব্রাউজারে <code>X-Frame-Options: SAMEORIGIN</code> হেডার পাঠায়, তাই কোনো থার্ড-পার্টি অ্যাপের ভেতর সরাসরি ফ্রেম (iframe) লোড করা ব্লক থাকে। নিচের বাটনে ক্লিক করে সরাসরি আপনার ব্রাউজারে ওয়েবসাইটটি ওপেন করুন অথবা উপরের <strong>স্পোর্টস ও এক্সচেঞ্জ / ক্যাসিনো / API</strong> ট্যাব ব্যবহার করুন।
+      </p>
+      <div class="cta-row">
+        <a class="btn-primary" href="${safeEscapedUrl}" target="_blank" rel="noopener noreferrer">
+          🚀 সরাসরি Betjili365.com/bd/bn ওপেন করুন ↗
+        </a>
+        <a class="btn-secondary" href="https://betjili365.com/bd/bn/member/login" target="_blank" rel="noopener noreferrer">
+          🔑 অফিশিয়াল লগইন / সাইনআপ ↗
+        </a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <a class="cat" href="https://betjili365.com/bd/bn/sports" target="_blank" rel="noopener noreferrer"><span>🏏 ক্রিকেট ও স্পোর্টস</span><span class="tag">↗</span></a>
+      <a class="cat" href="https://betjili365.com/bd/bn/casino" target="_blank" rel="noopener noreferrer"><span>🃏 লাইভ ক্যাসিনো</span><span class="tag">↗</span></a>
+      <a class="cat" href="https://betjili365.com/bd/bn/slot" target="_blank" rel="noopener noreferrer"><span>🎰 স্লট গেমস</span><span class="tag">↗</span></a>
+      <a class="cat" href="https://betjili365.com/bd/bn/crash" target="_blank" rel="noopener noreferrer"><span>✈️ ক্র্যাশ / Aviator</span><span class="tag">↗</span></a>
+      <a class="cat" href="https://betjili365.com/bd/bn/fishing" target="_blank" rel="noopener noreferrer"><span>🎣 ফিশিং গেম</span><span class="tag">↗</span></a>
+      <a class="cat" href="https://betjili365.com/bd/bn/promotion" target="_blank" rel="noopener noreferrer"><span>🎁 প্রমোশন ও বোনাস</span><span class="tag">↗</span></a>
+    </div>
+  </div>
+</body>
+</html>`);
+  });
+
   app.get("/api/betjili365/status", async (_req, res) => {
     const probe = await probeBetjili365Upstream(BETJILI365_BASE_URL);
     return res.json({

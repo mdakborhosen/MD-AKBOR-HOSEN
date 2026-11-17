@@ -1588,7 +1588,13 @@ export default function App() {
     return lang === 'bn' ? titlesBn[pageId] : titlesEn[pageId];
   }, [lang]);
 
+  const [betjiliOpenNonce, setBetjiliOpenNonce] = useState(0);
+
   const navigateToSubPage = useCallback((nextPage: AppSubPageId) => {
+    setActiveInAppGoogleTabId(null);
+    if (nextPage === 'betjili365') {
+      setBetjiliOpenNonce((n) => n + 1);
+    }
     const prevPage = activeSubPageRef.current;
     if (prevPage === nextPage) {
       setIsUnifiedMenuOpen(false);
@@ -12553,6 +12559,7 @@ export default function App() {
           ) : activeSubPage === 'betjili365' ? (
             <Betjili365Tab
               lang={lang}
+              openWebsiteNonce={betjiliOpenNonce}
               onSyncMatchToScorer={(ev: BetjiliFeedEvent) => {
                 if (ev.sport === 'football') {
                   addNewFootballMatch(ev.team1Full || ev.team1, ev.team2Full || ev.team2, ev.liveSyncUrl);

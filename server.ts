@@ -4,6 +4,7 @@ import https from "https";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import axios from "axios";
@@ -57,6 +58,9 @@ try {
 const BACKUP_FILE = path.join(DATA_DIR, "cricket_backup.json");
 const ADMIN_DEFAULT_MATCHES_FILE = path.join(DATA_DIR, "admin_default_matches.json");
 const ADMIN_DEFAULT_SERIES_FILE = path.join(DATA_DIR, "admin_default_series.json");
+const BETJILI_ACCOUNTS_FILE = path.join(DATA_DIR, "betjili365_accounts.json");
+const BETJILI_BETS_FILE = path.join(DATA_DIR, "betjili365_bets.json");
+const BETJILI_TX_FILE = path.join(DATA_DIR, "betjili365_transactions.json");
 
 // In-memory demo match simulators for interactive testing
 const demoMatches: Record<string, any> = {
@@ -5868,6 +5872,1046 @@ Return ONLY valid JSON without markdown fences.`
 </html>`);
     } catch (e: any) {
       return res.status(200).send(`<html><body style="background:#12151e;color:#fff;font-family:sans-serif;padding:16px;">Sofascore Preview Ready</body></html>`);
+    }
+  });
+
+  // ===========================================================================
+  // BETJILI365 (https://betjili365.com/bd/bn) API BRIDGE & LIVE SPORTS FEED
+  // Provides localized BD/BN sportsbook markets, exchange odds, live feed & URL sync
+  // ===========================================================================
+  const BETJILI365_BASE_URL = "https://betjili365.com/bd/bn";
+
+  function computeDeterministicOdds(seedStr: string, scoreDiff = 0, isFootball = false) {
+    let hash = 0;
+    for (let i = 0; i < seedStr.length; i++) {
+      hash = (hash * 31 + seedStr.charCodeAt(i)) >>> 0;
+    }
+    const baseTilt = ((hash % 40) - 20) / 100; // -0.20 to +0.19
+    const scoreTilt = Math.max(-0.35, Math.min(0.35, scoreDiff * (isFootball ? 0.14 : 0.008)));
+    const pHome = Math.max(0.18, Math.min(0.78, 0.46 + baseTilt + scoreTilt));
+    const pDraw = isFootball ? 0.24 : 0.0;
+    const pAway = Math.max(0.14, 1 - pHome - pDraw);
+
+    const fmt = (val: number) => Number(Math.max(1.06, Math.min(18.5, val)).toFixed(2));
+    const homeBack = fmt(0.95 / pHome);
+    const homeLay = fmt(homeBack + (homeBack < 2 ? 0.03 : 0.06));
+    const awayBack = fmt(0.95 / pAway);
+    const awayLay = fmt(awayBack + (awayBack < 2 ? 0.03 : 0.06));
+    const drawBack = isFootball ? fmt(0.94 / pDraw) : undefined;
+    const drawLay = isFootball && drawBack ? fmt(drawBack + 0.08) : undefined;
+
+    return {
+      home: { back: homeBack, lay: homeLay },
+      ...(isFootball ? { draw: { back: drawBack!, lay: drawLay! } } : {}),
+      away: { back: awayBack, lay: awayLay }
+    };
+  }
+
+  async function probeBetjili365Upstream(targetUrl = BETJILI365_BASE_URL) {
+    const started = Date.now();
+    try {
+      const resp = await axios.get(targetUrl, {
+        timeout: 3500,
+        validateStatus: () => true,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+      });
+      const bodyStr = typeof resp.data === "string" ? resp.data : "";
+      const isCfBlocked = resp.status === 403 || /cloudflare|attention required|just a moment/i.test(bodyStr);
+      const titleMatch = bodyStr.match(/<title[^>]*>([^<]+)<\/title>/i);
+      return {
+        targetUrl,
+        httpStatus: resp.status,
+        reachable: resp.status >= 200 && resp.status < 400 && !isCfBlocked,
+        cloudflareProtected: isCfBlocked,
+        pageTitle: titleMatch ? titleMatch[1].trim() : (isCfBlocked ? "Cloudflare Protected (betjili365.com/bd/bn)" : "Betjili365 BD/BN"),
+        latencyMs: Date.now() - started,
+        checkedAt: new Date().toISOString()
+      };
+    } catch (err: any) {
+      return {
+        targetUrl,
+        httpStatus: 0,
+        reachable: false,
+        cloudflareProtected: false,
+        pageTitle: "Betjili365 BD/BN",
+        error: err?.message || "Network timeout",
+        latencyMs: Date.now() - started,
+        checkedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  function buildExtendedBetjiliMarkets(
+    t1: string,
+    t2: string,
+    sport: "cricket" | "football",
+    matchOdds: { home: { back: number; lay: number }; draw?: { back: number; lay: number }; away: { back: number; lay: number } },
+    lineBase: number
+  ) {
+    if (sport === "cricket") {
+      const ppLine = Math.max(38, Math.min(62, Math.round(44 + (lineBase % 15))));
+      const sixLine = Math.max(8, Math.min(20, Math.round(10 + (lineBase % 8))));
+      return [
+        {
+          key: "bookmaker",
+          titleBn: "বুকমেকার (০% কমিশন)",
+          outcomes: [
+            { id: "bm-1", label: `${t1} জিতবে (Back)`, odds: Number(Math.max(1.05, matchOdds.home.back - 0.03).toFixed(2)), side: "back", ruleType: "w1" },
+            { id: "bm-2", label: `${t2} জিতবে (Back)`, odds: Number(Math.max(1.05, matchOdds.away.back - 0.03).toFixed(2)), side: "back", ruleType: "w2" }
+          ]
+        },
+        {
+          key: "toss",
+          titleBn: "টস বিজয়ী (Toss Winner)",
+          outcomes: [
+            { id: "toss-1", label: `${t1} টস জিতবে`, odds: 1.92, side: "back", ruleType: "auto" },
+            { id: "toss-2", label: `${t2} টস জিতবে`, odds: 1.92, side: "back", ruleType: "auto" }
+          ]
+        },
+        {
+          key: "powerplay",
+          titleBn: `পাওয়ারপ্লে (৬ ওভার) রান — লাইন ${ppLine}.৫`,
+          outcomes: [
+            { id: "pp-over", label: `Over ${ppLine}.5 রান`, odds: 1.88, side: "back", ruleType: "total_over", targetValue: ppLine + 0.5 },
+            { id: "pp-under", label: `Under ${ppLine}.5 রান`, odds: 1.92, side: "lay", ruleType: "total_under", targetValue: ppLine + 0.5 }
+          ]
+        },
+        {
+          key: "sixes",
+          titleBn: `ম্যাচে মোট ছক্কা (Total Sixes ${sixLine}.৫)`,
+          outcomes: [
+            { id: "six-over", label: `Over ${sixLine}.5 ছক্কা`, odds: 1.90, side: "back", ruleType: "auto" },
+            { id: "six-under", label: `Under ${sixLine}.5 ছক্কা`, odds: 1.90, side: "back", ruleType: "auto" }
+          ]
+        }
+      ];
+    }
+
+    // Football markets
+    return [
+      {
+        key: "double_chance",
+        titleBn: "ডাবল চান্স (Double Chance)",
+        outcomes: [
+          { id: "dc-1x", label: `1X (${t1} বা ড্র)`, odds: Number(Math.max(1.08, Math.min(2.6, matchOdds.home.back * 0.68)).toFixed(2)), side: "back", ruleType: "auto" },
+          { id: "dc-12", label: `12 (${t1} বা ${t2})`, odds: 1.28, side: "back", ruleType: "auto" },
+          { id: "dc-x2", label: `X2 (ড্র বা ${t2})`, odds: Number(Math.max(1.08, Math.min(2.8, matchOdds.away.back * 0.68)).toFixed(2)), side: "back", ruleType: "auto" }
+        ]
+      },
+      {
+        key: "btts",
+        titleBn: "উভয় দল গোল করবে (BTTS)",
+        outcomes: [
+          { id: "btts-yes", label: "হ্যাঁ (GG / Both Score)", odds: 1.78, side: "back", ruleType: "auto" },
+          { id: "btts-no", label: "না (NG)", odds: 1.98, side: "back", ruleType: "auto" }
+        ]
+      },
+      {
+        key: "handicap",
+        titleBn: "এশিয়ান হ্যান্ডিক্যাপ (-০.৫ / +০.৫)",
+        outcomes: [
+          { id: "ah-1", label: `${t1} (-0.5)`, odds: Number(Math.max(1.12, matchOdds.home.back - 0.05).toFixed(2)), side: "back", ruleType: "w1" },
+          { id: "ah-2", label: `${t2} (+0.5)`, odds: Number(Math.max(1.15, matchOdds.away.back * 0.72).toFixed(2)), side: "back", ruleType: "auto" }
+        ]
+      },
+      {
+        key: "corners",
+        titleBn: "মোট কর্নার (Total Corners 9.5)",
+        outcomes: [
+          { id: "cor-over", label: "Over 9.5 কর্নার", odds: 1.87, side: "back", ruleType: "auto" },
+          { id: "cor-under", label: "Under 9.5 কর্নার", odds: 1.93, side: "back", ruleType: "auto" }
+        ]
+      }
+    ];
+  }
+
+  app.get("/api/betjili365/status", async (_req, res) => {
+    const probe = await probeBetjili365Upstream(BETJILI365_BASE_URL);
+    return res.json({
+      success: true,
+      provider: "Betjili365 BD/BN API",
+      website: BETJILI365_BASE_URL,
+      locale: "bd/bn",
+      currency: "BDT",
+      upstreamProbe: probe,
+      endpoints: [
+        { method: "GET", path: "/api/betjili365/feed", description: "লাইভ ও আসন্ন ক্রিকেট/ফুটবল ম্যাচ এবং সব মার্কেট অডস (BD/BN)" },
+        { method: "POST", path: "/api/betjili365/auth/register", description: "নতুন Betjili365 অ্যাপ অ্যাকাউন্ট তৈরি ও ভার্চুয়াল BDT ওয়ালেট চালু" },
+        { method: "POST", path: "/api/betjili365/auth/login", description: "API দিয়ে অ্যাকাউন্ট লগইন ও Bearer সেশন টোকেন সংগ্রহ" },
+        { method: "GET", path: "/api/betjili365/auth/me", description: "লগইনকৃত ইউজারের প্রোফাইল ও ব্যালেন্স যাচাই" },
+        { method: "POST", path: "/api/betjili365/wallet/action", description: "ডিপোজিট/উইথড্র সিমুলেশন ও বোনাস ক্লেইম (BDT)" },
+        { method: "POST", path: "/api/betjili365/bets/place", description: "একক বা মাল্টি-বেট প্লেস (Exchange Back/Lay, Fancy, Sportsbook)" },
+        { method: "GET", path: "/api/betjili365/bets", description: "ওপেন ও সেটলড বেট টিকিট তালিকা" },
+        { method: "POST", path: "/api/betjili365/bets/cashout", description: "ওপেন বেট ইনস্ট্যান্ট ক্যাশআউট" },
+        { method: "POST", path: "/api/betjili365/games/play", description: "Aviator ক্র্যাশ, 7Up ডাইস, লাকি স্পিন ও কয়েন টস মিনি গেম API" },
+        { method: "POST", path: "/api/betjili365/sync-url", description: "Betjili365 URL পার্স ও স্কোরার লাইভ সিঙ্ক" },
+        { method: "GET", path: "/api/betjili365/status", description: "টার্গেট ওয়েবসাইট ও API স্ট্যাটাস" }
+      ]
+    });
+  });
+
+  app.get("/api/betjili365/feed", async (req, res) => {
+    const started = Date.now();
+    try {
+      const sportFilter = String(req.query.sport || "all").toLowerCase().trim();
+      const statusFilter = String(req.query.filter || "all").toLowerCase().trim();
+      const searchQ = String(req.query.q || "").toLowerCase().trim();
+
+      // Run upstream website probe + live ESPN cricket & soccer feeds concurrently
+      const [probe, cricketRes, soccerRes] = await Promise.allSettled([
+        probeBetjili365Upstream(BETJILI365_BASE_URL),
+        axios.get("https://site.api.espn.com/apis/site/v2/sports/cricket/scorepanel", { timeout: 4000 }),
+        axios.get("https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?limit=50", { timeout: 4000 })
+      ]);
+
+      const upstreamProbe = probe.status === "fulfilled"
+        ? probe.value
+        : { targetUrl: BETJILI365_BASE_URL, httpStatus: 0, reachable: false, cloudflareProtected: true, checkedAt: new Date().toISOString() };
+
+      const events: any[] = [];
+
+      // 1. Live & Upcoming Cricket from ESPN Scorepanel
+      if (cricketRes.status === "fulfilled") {
+        const scores = Array.isArray(cricketRes.value.data?.scores) ? cricketRes.value.data.scores : [];
+        for (const leagueGroup of scores) {
+          const leagueName = leagueGroup?.leagues?.[0]?.name || leagueGroup?.leagues?.[0]?.abbreviation || "আন্তর্জাতিক ক্রিকেট";
+          for (const ev of (leagueGroup.events || []).slice(0, 8)) {
+            const comp = ev.competitions?.[0];
+            const competitors = comp?.competitors || [];
+            if (competitors.length < 2) continue;
+
+            const c1 = competitors[0];
+            const c2 = competitors[1];
+            const t1 = c1?.team?.abbreviation || c1?.team?.shortDisplayName || c1?.team?.displayName || "Team 1";
+            const t2 = c2?.team?.abbreviation || c2?.team?.shortDisplayName || c2?.team?.displayName || "Team 2";
+            const t1Full = c1?.team?.displayName || t1;
+            const t2Full = c2?.team?.displayName || t2;
+            const state = String(ev.status?.type?.state || "in").toLowerCase();
+            const matchStatus = state === "pre" ? "upcoming" : state === "post" ? "finished" : "live";
+
+            const c1ScoreRaw = String(c1?.score || "").trim();
+            const c2ScoreRaw = String(c2?.score || "").trim();
+            const c1Match = c1ScoreRaw.match(/(\d+)\/(\d+)/);
+            const c2Match = c2ScoreRaw.match(/(\d+)\/(\d+)/);
+            const runs1 = c1Match ? parseInt(c1Match[1], 10) : 0;
+            const runs2 = c2Match ? parseInt(c2Match[1], 10) : 0;
+            const activeScoreRaw = c2Match ? c2ScoreRaw : (c1ScoreRaw || c2ScoreRaw);
+            const ovMatch = activeScoreRaw.match(/\((\d+(?:\.\d+)?)\s*ov/i);
+            const oversVal = ovMatch ? parseFloat(ovMatch[1]) : 0;
+
+            const slug = `${t1.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-vs-${t2.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+            const lineBase = Math.max(42, Math.min(210, Math.round((runs2 || runs1 || 85) + 45)));
+            const odds = computeDeterministicOdds(`${t1}-${t2}-${ev.id}`, runs1 - runs2, false);
+
+            events.push({
+              id: `bj-cric-${ev.id || slug}`,
+              sport: "cricket",
+              sportLabelBn: "ক্রিকেট",
+              league: leagueName,
+              team1: t1,
+              team2: t2,
+              team1Full: t1Full,
+              team2Full: t2Full,
+              status: matchStatus,
+              statusLabelBn: matchStatus === "live" ? "লাইভ" : matchStatus === "upcoming" ? "আসন্ন" : "সমাপ্ত",
+              statusText: ev.status?.type?.detail || ev.status?.type?.description || `${t1} vs ${t2}`,
+              score1: c1ScoreRaw || (matchStatus === "upcoming" ? "—" : "0/0"),
+              score2: c2ScoreRaw || (matchStatus === "upcoming" ? "—" : "0/0"),
+              overs: oversVal,
+              startTime: ev.date || new Date().toISOString(),
+              betjiliUrl: `${BETJILI365_BASE_URL}/sports/cricket/${slug}`,
+              liveSyncUrl: `https://crex.com/cricket-live-score/${slug}`,
+              markets: {
+                matchOdds: odds,
+                fancyMarket: {
+                  titleBn: `ইনিংস মোট রান (ওভার/আন্ডার ${lineBase}.৫)`,
+                  line: `${lineBase}.5`,
+                  overOdds: 1.88,
+                  underOdds: 1.92
+                },
+                extendedMarkets: buildExtendedBetjiliMarkets(t1, t2, "cricket", odds, lineBase)
+              }
+            });
+          }
+        }
+      }
+
+      // 2. Live & Upcoming Football from ESPN Soccer Scoreboard
+      if (soccerRes.status === "fulfilled") {
+        const fbEvents = Array.isArray(soccerRes.value.data?.events) ? soccerRes.value.data.events : [];
+        for (const ev of fbEvents.slice(0, 14)) {
+          const comp = ev.competitions?.[0];
+          const competitors = comp?.competitors || [];
+          if (competitors.length < 2) continue;
+
+          const home = competitors.find((c: any) => c.homeAway === "home") || competitors[0];
+          const away = competitors.find((c: any) => c.homeAway === "away") || competitors[1];
+          const t1 = home?.team?.shortDisplayName || home?.team?.displayName || "Home";
+          const t2 = away?.team?.shortDisplayName || away?.team?.displayName || "Away";
+          const s1 = parseInt(String(home?.score ?? "0"), 10) || 0;
+          const s2 = parseInt(String(away?.score ?? "0"), 10) || 0;
+          const state = String(comp?.status?.type?.state || "in").toLowerCase();
+          const matchStatus = state === "pre" ? "upcoming" : state === "post" ? "finished" : "live";
+          const clock = comp?.status?.displayClock || comp?.status?.type?.shortDetail || "";
+          const leagueName = ev.season?.slug?.replace(/-/g, " ").toUpperCase() || comp?.venue?.city || "ফুটবল লিগ";
+          const slug = `${t1.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${t2.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+          const odds = computeDeterministicOdds(`${t1}-${t2}-${ev.id}`, s1 - s2, true);
+          const goalLine = Math.max(2.5, Math.floor(s1 + s2) + 0.5);
+
+          events.push({
+            id: `bj-fb-${ev.id || slug}`,
+            sport: "football",
+            sportLabelBn: "ফুটবল",
+            league: leagueName,
+            team1: t1,
+            team2: t2,
+            team1Full: home?.team?.displayName || t1,
+            team2Full: away?.team?.displayName || t2,
+            status: matchStatus,
+            statusLabelBn: matchStatus === "live" ? `লাইভ ${clock}` : matchStatus === "upcoming" ? "আসন্ন" : "সমাপ্ত (FT)",
+            statusText: comp?.status?.type?.shortDetail || `${t1} ${s1} - ${s2} ${t2}`,
+            score1: String(s1),
+            score2: String(s2),
+            minute: clock,
+            startTime: ev.date || new Date().toISOString(),
+            betjiliUrl: `${BETJILI365_BASE_URL}/sports/soccer/${slug}`,
+            liveSyncUrl: `https://www.sofascore.com/football/match/${slug}`,
+            markets: {
+              matchOdds: odds,
+              fancyMarket: {
+                titleBn: `মোট গোল (ওভার/আন্ডার ${goalLine})`,
+                line: `${goalLine}`,
+                overOdds: 1.91,
+                underOdds: 1.89
+              },
+              extendedMarkets: buildExtendedBetjiliMarkets(t1, t2, "football", odds, Math.round(goalLine * 10))
+            }
+          });
+        }
+      }
+
+      // Ensure rich BD/BN featured markets exist even if upstream has quiet hours
+      if (events.length === 0) {
+        events.push(
+          {
+            id: "bj-featured-ban-ind",
+            sport: "cricket",
+            sportLabelBn: "ক্রিকেট",
+            league: "T20 আন্তর্জাতিক (BD/BN)",
+            team1: "BAN",
+            team2: "IND",
+            team1Full: "Bangladesh",
+            team2Full: "India",
+            status: "live",
+            statusLabelBn: "লাইভ",
+            statusText: "BAN need 34 runs in 22 balls",
+            score1: "181/6 (20.0)",
+            score2: "148/3 (16.2)",
+            overs: 16.2,
+            startTime: new Date().toISOString(),
+            betjiliUrl: `${BETJILI365_BASE_URL}/sports/cricket/ban-vs-ind`,
+            liveSyncUrl: "demo://ban-vs-ind",
+            markets: {
+              matchOdds: computeDeterministicOdds("ban-ind-featured", -5, false),
+              fancyMarket: {
+                titleBn: "২০ ওভার মোট রান (ওভার/আন্ডার ১৮৫.৫)",
+                line: "185.5",
+                overOdds: 1.9,
+                underOdds: 1.9
+              },
+              extendedMarkets: buildExtendedBetjiliMarkets(
+                "BAN",
+                "IND",
+                "cricket",
+                computeDeterministicOdds("ban-ind-featured", -5, false),
+                185
+              )
+            }
+          },
+          {
+            id: "bj-featured-rm-fcb",
+            sport: "football",
+            sportLabelBn: "ফুটবল",
+            league: "লা লিগা (El Clasico)",
+            team1: "Real Madrid",
+            team2: "Barcelona",
+            team1Full: "Real Madrid",
+            team2Full: "FC Barcelona",
+            status: "live",
+            statusLabelBn: "লাইভ 74'",
+            statusText: "2nd Half • 74'",
+            score1: "2",
+            score2: "1",
+            minute: "74'",
+            startTime: new Date().toISOString(),
+            betjiliUrl: `${BETJILI365_BASE_URL}/sports/soccer/real-madrid-vs-barcelona`,
+            liveSyncUrl: "sofascore://real-madrid-vs-barcelona",
+            markets: {
+              matchOdds: computeDeterministicOdds("rm-fcb-featured", 1, true),
+              fancyMarket: {
+                titleBn: "মোট গোল (ওভার/আন্ডার ৩.৫)",
+                line: "3.5",
+                overOdds: 1.85,
+                underOdds: 1.95
+              },
+              extendedMarkets: buildExtendedBetjiliMarkets(
+                "Real Madrid",
+                "Barcelona",
+                "football",
+                computeDeterministicOdds("rm-fcb-featured", 1, true),
+                35
+              )
+            }
+          }
+        );
+      }
+
+      // Sort: live first, then upcoming, then finished
+      const orderRank: Record<string, number> = { live: 0, upcoming: 1, finished: 2 };
+      events.sort((a, b) => (orderRank[a.status] ?? 9) - (orderRank[b.status] ?? 9));
+
+      let filtered = events;
+      if (sportFilter === "cricket" || sportFilter === "football") {
+        filtered = filtered.filter((e) => e.sport === sportFilter);
+      }
+      if (statusFilter === "live" || statusFilter === "upcoming" || statusFilter === "finished") {
+        filtered = filtered.filter((e) => e.status === statusFilter);
+      }
+      if (searchQ) {
+        filtered = filtered.filter((e) =>
+          `${e.team1} ${e.team2} ${e.team1Full} ${e.team2Full} ${e.league} ${e.statusText}`.toLowerCase().includes(searchQ)
+        );
+      }
+
+      return res.json({
+        success: true,
+        provider: "Betjili365",
+        sourceUrl: BETJILI365_BASE_URL,
+        locale: "bd/bn",
+        currency: "BDT",
+        upstreamProbe,
+        responseTimeMs: Date.now() - started,
+        lastUpdated: new Date().toISOString(),
+        summary: {
+          total: events.length,
+          filtered: filtered.length,
+          liveCount: events.filter((e) => e.status === "live").length,
+          upcomingCount: events.filter((e) => e.status === "upcoming").length,
+          cricketCount: events.filter((e) => e.sport === "cricket").length,
+          footballCount: events.filter((e) => e.sport === "football").length
+        },
+        events: filtered
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        provider: "Betjili365",
+        sourceUrl: BETJILI365_BASE_URL,
+        error: err?.message || "Failed to fetch Betjili365 API feed"
+      });
+    }
+  });
+
+  app.post("/api/betjili365/sync-url", async (req, res) => {
+    try {
+      const rawUrl = String(req.body?.url || BETJILI365_BASE_URL).trim();
+      const inputSport = String(req.body?.sport || "").toLowerCase();
+      const probe = await probeBetjili365Upstream(rawUrl);
+
+      // Extract potential team names from Betjili URL slug if present
+      let team1 = String(req.body?.team1 || "").trim();
+      let team2 = String(req.body?.team2 || "").trim();
+      let detectedSport: "cricket" | "football" = inputSport === "football" ? "football" : "cricket";
+
+      if (/soccer|football|fifa|ucl|la-liga|premier/i.test(rawUrl)) {
+        detectedSport = "football";
+      }
+
+      if (!team1 || !team2) {
+        try {
+          const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
+          const segs = u.pathname.split("/").filter(Boolean);
+          const lastSeg = decodeURIComponent(segs[segs.length - 1] || "");
+          const vsMatch = lastSeg.match(/^([a-z0-9-]+?)-vs-([a-z0-9-]+)$/i);
+          if (vsMatch) {
+            team1 = vsMatch[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            team2 = vsMatch[2].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+          }
+        } catch {}
+      }
+
+      let liveData: any = null;
+      if (team1 && team2) {
+        const slug1 = team1.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const slug2 = team2.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const targetLiveUrl = detectedSport === "football"
+          ? buildSofascoreMatchUrl(team1, team2, Date.now() % 9000000)
+          : `https://crex.com/cricket-live-score/${slug1}-vs-${slug2}`;
+        liveData = await parseLiveCricketUrl(targetLiveUrl, team1, team2, detectedSport).catch(() => null);
+      }
+
+      return res.json({
+        success: true,
+        sourceUrl: rawUrl,
+        detectedSport,
+        team1: team1 || liveData?.team1 || "BAN",
+        team2: team2 || liveData?.team2 || "IND",
+        upstreamProbe: probe,
+        liveData,
+        markets: computeDeterministicOdds(`${team1}-${team2}-${rawUrl}`, 0, detectedSport === "football")
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Failed to sync Betjili365 URL" });
+    }
+  });
+
+  // ===========================================================================
+  // BETJILI365 APP ACCOUNT AUTH, VIRTUAL BDT WALLET, BETTING & MINI-GAMES API
+  // Persistent JSON-backed sandbox sportsbook & exchange API (not official betjili365.com accounts)
+  // ===========================================================================
+  interface BetjiliAccount {
+    id: string;
+    username: string;
+    phone: string;
+    displayName: string;
+    passwordSalt: string;
+    passwordHash: string;
+    balanceBdt: number;
+    vipLevel: "Bronze" | "Silver" | "Gold" | "Diamond";
+    vipPoints: number;
+    claimedBonuses: string[];
+    totalWagered: number;
+    totalWon: number;
+    createdAt: string;
+  }
+
+  interface BetjiliSessionInfo {
+    token: string;
+    userId: string;
+    expiresAt: number;
+  }
+
+  const betjiliSessions = new Map<string, BetjiliSessionInfo>();
+
+  function readJsonArraySafe<T>(filePath: string): T[] {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch {}
+    return [];
+  }
+
+  function writeJsonArraySafe(filePath: string, data: any[]) {
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+    } catch (err) {
+      console.error("[Betjili365 Store Write Error]", err);
+    }
+  }
+
+  function hashBetjiliPassword(password: string, salt: string): string {
+    return crypto.scryptSync(password, salt, 32).toString("hex");
+  }
+
+  function sanitizeBetjiliUser(acc: BetjiliAccount) {
+    return {
+      id: acc.id,
+      username: acc.username,
+      phone: acc.phone,
+      displayName: acc.displayName,
+      balanceBdt: Number(acc.balanceBdt.toFixed(2)),
+      vipLevel: acc.vipLevel,
+      vipPoints: acc.vipPoints,
+      claimedBonuses: acc.claimedBonuses || [],
+      totalWagered: Number((acc.totalWagered || 0).toFixed(2)),
+      totalWon: Number((acc.totalWon || 0).toFixed(2)),
+      createdAt: acc.createdAt,
+      accountScope: "app-sandbox"
+    };
+  }
+
+  function computeVipTier(points: number): "Bronze" | "Silver" | "Gold" | "Diamond" {
+    if (points >= 5000) return "Diamond";
+    if (points >= 1500) return "Gold";
+    if (points >= 400) return "Silver";
+    return "Bronze";
+  }
+
+  function resolveBetjiliAuth(req: express.Request): { account: BetjiliAccount; accounts: BetjiliAccount[]; token: string } | null {
+    const authHeader = String(req.headers.authorization || "");
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : String(req.query.token || "").trim();
+    if (!bearer) return null;
+    const sess = betjiliSessions.get(bearer);
+    if (!sess || sess.expiresAt < Date.now()) {
+      if (sess) betjiliSessions.delete(bearer);
+      return null;
+    }
+    const accounts = readJsonArraySafe<BetjiliAccount>(BETJILI_ACCOUNTS_FILE);
+    const acc = accounts.find((a) => a.id === sess.userId);
+    if (!acc) return null;
+    return { account: acc, accounts, token: bearer };
+  }
+
+  function recordBetjiliTx(userId: string, type: "deposit" | "withdraw" | "bonus" | "bet" | "win" | "cashout" | "game_bet" | "game_win", amount: number, method: string, note: string, balanceAfter: number) {
+    const txs = readJsonArraySafe<any>(BETJILI_TX_FILE);
+    txs.unshift({
+      id: `tx-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
+      userId,
+      type,
+      amount: Number(amount.toFixed(2)),
+      method,
+      note,
+      balanceAfter: Number(balanceAfter.toFixed(2)),
+      createdAt: new Date().toISOString()
+    });
+    writeJsonArraySafe(BETJILI_TX_FILE, txs.slice(0, 500));
+  }
+
+  app.post("/api/betjili365/auth/register", (req, res) => {
+    try {
+      const username = String(req.body?.username || "").trim().toLowerCase();
+      const phone = String(req.body?.phone || "").trim();
+      const displayName = String(req.body?.displayName || username || "Player").trim();
+      const password = String(req.body?.password || "");
+
+      if (!username || username.length < 3) {
+        return res.status(400).json({ success: false, error: "ইউজারনেম কমপক্ষে ৩ অক্ষরের হতে হবে।" });
+      }
+      if (!password || password.length < 4) {
+        return res.status(400).json({ success: false, error: "পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।" });
+      }
+
+      const accounts = readJsonArraySafe<BetjiliAccount>(BETJILI_ACCOUNTS_FILE);
+      if (accounts.some((a) => a.username === username || (phone && a.phone === phone))) {
+        return res.status(409).json({ success: false, error: "এই ইউজারনেম বা মোবাইল নম্বর দিয়ে ইতিমধ্যে অ্যাকাউন্ট খোলা আছে।" });
+      }
+
+      const salt = crypto.randomBytes(16).toString("hex");
+      const newAcc: BetjiliAccount = {
+        id: `bj-u-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`,
+        username,
+        phone: phone || "01700000000",
+        displayName,
+        passwordSalt: salt,
+        passwordHash: hashBetjiliPassword(password, salt),
+        balanceBdt: 5000,
+        vipLevel: "Bronze",
+        vipPoints: 50,
+        claimedBonuses: ["signup_welcome"],
+        totalWagered: 0,
+        totalWon: 0,
+        createdAt: new Date().toISOString()
+      };
+
+      accounts.push(newAcc);
+      writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+      recordBetjiliTx(newAcc.id, "bonus", 5000, "Welcome Bonus", "অ্যাকাউন্ট খোলার ভার্চুয়াল BDT ওয়েলকাম ব্যালেন্স", newAcc.balanceBdt);
+
+      const token = crypto.randomBytes(24).toString("hex");
+      betjiliSessions.set(token, { token, userId: newAcc.id, expiresAt: Date.now() + 7 * 24 * 3600 * 1000 });
+
+      return res.json({
+        success: true,
+        token,
+        user: sanitizeBetjiliUser(newAcc),
+        notice: "অ্যাপের নিজস্ব Betjili365-স্টাইল API স্যান্ডবক্স অ্যাকাউন্ট চালু হয়েছে (৳৫,০০০ ভার্চুয়াল ব্যালেন্সসহ)।"
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Registration failed" });
+    }
+  });
+
+  app.post("/api/betjili365/auth/login", (req, res) => {
+    try {
+      const identifier = String(req.body?.username || req.body?.identifier || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+
+      if (!identifier || !password) {
+        return res.status(400).json({ success: false, error: "ইউজারনেম/ফোন এবং পাসওয়ার্ড দিন।" });
+      }
+
+      const accounts = readJsonArraySafe<BetjiliAccount>(BETJILI_ACCOUNTS_FILE);
+      const acc = accounts.find((a) => a.username === identifier || a.phone.toLowerCase() === identifier);
+      if (!acc) {
+        return res.status(401).json({ success: false, error: "অ্যাকাউন্ট পাওয়া যায়নি। নতুন অ্যাকাউন্ট রেজিস্টার করুন।" });
+      }
+
+      const candidateHash = hashBetjiliPassword(password, acc.passwordSalt);
+      if (candidateHash !== acc.passwordHash) {
+        return res.status(401).json({ success: false, error: "ভুল পাসওয়ার্ড দিয়েছেন।" });
+      }
+
+      const token = crypto.randomBytes(24).toString("hex");
+      betjiliSessions.set(token, { token, userId: acc.id, expiresAt: Date.now() + 7 * 24 * 3600 * 1000 });
+
+      return res.json({
+        success: true,
+        token,
+        user: sanitizeBetjiliUser(acc)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Login failed" });
+    }
+  });
+
+  app.get("/api/betjili365/auth/me", (req, res) => {
+    const resolved = resolveBetjiliAuth(req);
+    if (!resolved) {
+      return res.status(401).json({ success: false, error: "সেশন পাওয়া যায়নি বা মেয়াদ শেষ হয়েছে। অনুগ্রহ করে লগইন করুন।" });
+    }
+    return res.json({ success: true, user: sanitizeBetjiliUser(resolved.account) });
+  });
+
+  app.post("/api/betjili365/auth/logout", (req, res) => {
+    const authHeader = String(req.headers.authorization || "");
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    if (bearer) betjiliSessions.delete(bearer);
+    return res.json({ success: true });
+  });
+
+  app.get("/api/betjili365/wallet/transactions", (req, res) => {
+    const resolved = resolveBetjiliAuth(req);
+    if (!resolved) return res.status(401).json({ success: false, error: "Unauthorized" });
+    const txs = readJsonArraySafe<any>(BETJILI_TX_FILE).filter((t) => t.userId === resolved.account.id);
+    return res.json({ success: true, transactions: txs.slice(0, 60) });
+  });
+
+  app.post("/api/betjili365/wallet/action", (req, res) => {
+    try {
+      const resolved = resolveBetjiliAuth(req);
+      if (!resolved) return res.status(401).json({ success: false, error: "প্রথমে API অ্যাকাউন্টে লগইন করুন।" });
+
+      const { account, accounts } = resolved;
+      const action = String(req.body?.action || "").toLowerCase();
+      const amount = Number(req.body?.amount || 0);
+      const method = String(req.body?.method || "bKash").trim();
+      const bonusId = String(req.body?.bonusId || "").trim();
+
+      if (action === "deposit") {
+        if (!Number.isFinite(amount) || amount < 100 || amount > 100000) {
+          return res.status(400).json({ success: false, error: "ডিপোজিট পরিমাণ ৳১০০ থেকে ৳১,০০,০০০ এর মধ্যে হতে হবে।" });
+        }
+        account.balanceBdt += amount;
+        account.vipPoints += Math.floor(amount / 100);
+        account.vipLevel = computeVipTier(account.vipPoints);
+        writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+        recordBetjiliTx(account.id, "deposit", amount, `${method} (স্যান্ডবক্স)`, `${method} ভার্চুয়াল টপ-আপ`, account.balanceBdt);
+        return res.json({ success: true, user: sanitizeBetjiliUser(account), message: `৳${amount} ভার্চুয়াল ব্যালেন্সে যোগ হয়েছে।` });
+      }
+
+      if (action === "withdraw") {
+        if (!Number.isFinite(amount) || amount < 200) {
+          return res.status(400).json({ success: false, error: "উইথড্র সর্বনিম্ন ৳২০০ হতে হবে।" });
+        }
+        if (account.balanceBdt < amount) {
+          return res.status(400).json({ success: false, error: "পর্যাপ্ত ভার্চুয়াল ব্যালেন্স নেই।" });
+        }
+        account.balanceBdt -= amount;
+        writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+        recordBetjiliTx(account.id, "withdraw", -amount, `${method} (স্যান্ডবক্স)`, `${method} ভার্চুয়াল উইথড্র রেকর্ড`, account.balanceBdt);
+        return res.json({ success: true, user: sanitizeBetjiliUser(account), message: `৳${amount} উইথড্র রিকোয়েস্ট সম্পন্ন হয়েছে।` });
+      }
+
+      if (action === "claim_bonus") {
+        const promoAmounts: Record<string, { amount: number; title: string }> = {
+          daily_checkin: { amount: 500, title: "দৈনিক চেক-ইন বোনাস" },
+          sports_cashback: { amount: 1000, title: "ক্রিকেট ও ফুটবল ক্যাশব্যাক" },
+          vip_reload: { amount: 2000, title: "VIP রিলোড বোনাস" }
+        };
+        const promo = promoAmounts[bonusId];
+        if (!promo) {
+          return res.status(400).json({ success: false, error: "অবৈধ প্রমোশন কোড।" });
+        }
+        const dailyKey = bonusId === "daily_checkin" ? `daily_${new Date().toISOString().slice(0, 10)}` : bonusId;
+        if (account.claimedBonuses.includes(dailyKey)) {
+          return res.status(400).json({ success: false, error: "এই বোনাসটি ইতিমধ্যে নেওয়া হয়েছে।" });
+        }
+        account.claimedBonuses.push(dailyKey);
+        account.balanceBdt += promo.amount;
+        account.vipPoints += 50;
+        account.vipLevel = computeVipTier(account.vipPoints);
+        writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+        recordBetjiliTx(account.id, "bonus", promo.amount, "Promotion", promo.title, account.balanceBdt);
+        return res.json({ success: true, user: sanitizeBetjiliUser(account), message: `${promo.title}: +৳${promo.amount} যোগ হয়েছে!` });
+      }
+
+      return res.status(400).json({ success: false, error: "অবৈধ ওয়ালেট অ্যাকশন।" });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Wallet action failed" });
+    }
+  });
+
+  app.post("/api/betjili365/bets/place", (req, res) => {
+    try {
+      const resolved = resolveBetjiliAuth(req);
+      if (!resolved) return res.status(401).json({ success: false, error: "বেট প্লেস করতে প্রথমে API অ্যাকাউন্টে লগইন করুন।" });
+
+      const { account, accounts } = resolved;
+      const stake = Number(req.body?.stake || 0);
+      const betType = String(req.body?.betType || "single").toLowerCase() === "multi" ? "multi" : "single";
+      const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
+
+      if (selections.length === 0) {
+        return res.status(400).json({ success: false, error: "কমপক্ষে ১টি বেট অপশন সিলেক্ট করুন।" });
+      }
+      if (!Number.isFinite(stake) || stake < 10 || stake > 500000) {
+        return res.status(400).json({ success: false, error: "বেটের পরিমাণ ৳১০ থেকে ৳৫,০০,০০০ এর মধ্যে হতে হবে।" });
+      }
+      if (account.balanceBdt < stake) {
+        return res.status(400).json({ success: false, error: "অপর্যাপ্ত ভার্চুয়াল ব্যালেন্স। ওয়ালেট থেকে টপ-আপ বা বোনাস ক্লেইম করুন।" });
+      }
+
+      let combinedOdds = 1;
+      for (const s of selections) {
+        const o = Number(s?.odds || 1);
+        if (!Number.isFinite(o) || o < 1.01) {
+          return res.status(400).json({ success: false, error: "অবৈধ অডস ভ্যালু।" });
+        }
+        combinedOdds *= o;
+      }
+      combinedOdds = Number(combinedOdds.toFixed(2));
+      const potentialPayout = Number((stake * combinedOdds).toFixed(2));
+
+      account.balanceBdt -= stake;
+      account.totalWagered += stake;
+      account.vipPoints += Math.max(5, Math.floor(stake / 50));
+      account.vipLevel = computeVipTier(account.vipPoints);
+      writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+
+      const bets = readJsonArraySafe<any>(BETJILI_BETS_FILE);
+      const ticket = {
+        id: `BJ-${Date.now().toString().slice(-6)}${crypto.randomInt(10, 99)}`,
+        userId: account.id,
+        betType,
+        selections: selections.map((s: any) => ({
+          eventId: String(s.eventId || ""),
+          matchTitle: String(s.matchTitle || "Match"),
+          sport: String(s.sport || "cricket"),
+          marketName: String(s.marketName || "Match Odds"),
+          selectionLabel: String(s.selectionLabel || "Selection"),
+          side: String(s.side || "back"),
+          odds: Number(Number(s.odds || 1).toFixed(2))
+        })),
+        stake: Number(stake.toFixed(2)),
+        combinedOdds,
+        potentialPayout,
+        cashoutOffer: Number((stake * 0.92).toFixed(2)),
+        status: "open" as "open" | "won" | "lost" | "cashed_out",
+        payout: 0,
+        createdAt: new Date().toISOString()
+      };
+
+      bets.unshift(ticket);
+      writeJsonArraySafe(BETJILI_BETS_FILE, bets.slice(0, 500));
+      recordBetjiliTx(
+        account.id,
+        "bet",
+        -stake,
+        betType === "multi" ? "Multi Bet" : "Single Bet",
+        `${ticket.id}: ${ticket.selections[0]?.matchTitle || ""} (${ticket.selections.length} বাছাই @ ${combinedOdds})`,
+        account.balanceBdt
+      );
+
+      return res.json({
+        success: true,
+        ticket,
+        user: sanitizeBetjiliUser(account)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Failed to place bet" });
+    }
+  });
+
+  app.get("/api/betjili365/bets", (req, res) => {
+    const resolved = resolveBetjiliAuth(req);
+    if (!resolved) return res.status(401).json({ success: false, error: "Unauthorized" });
+    const bets = readJsonArraySafe<any>(BETJILI_BETS_FILE).filter((b) => b.userId === resolved.account.id);
+    return res.json({ success: true, bets: bets.slice(0, 100) });
+  });
+
+  app.post("/api/betjili365/bets/cashout", (req, res) => {
+    try {
+      const resolved = resolveBetjiliAuth(req);
+      if (!resolved) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+      const { account, accounts } = resolved;
+      const ticketId = String(req.body?.ticketId || "");
+      const bets = readJsonArraySafe<any>(BETJILI_BETS_FILE);
+      const ticket = bets.find((b) => b.id === ticketId && b.userId === account.id);
+      if (!ticket) return res.status(404).json({ success: false, error: "বেট টিকিট পাওয়া যায়নি।" });
+      if (ticket.status !== "open") return res.status(400).json({ success: false, error: "এই বেটটি ইতিমধ্যে সেটল বা ক্যাশআউট করা হয়েছে।" });
+
+      const offer = Number((ticket.cashoutOffer || ticket.stake * 0.92).toFixed(2));
+      ticket.status = "cashed_out";
+      ticket.payout = offer;
+      ticket.settledAt = new Date().toISOString();
+
+      account.balanceBdt += offer;
+      writeJsonArraySafe(BETJILI_BETS_FILE, bets);
+      writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+      recordBetjiliTx(account.id, "cashout", offer, "Cash Out", `টিকিট ${ticket.id} ক্যাশআউট`, account.balanceBdt);
+
+      return res.json({ success: true, ticket, user: sanitizeBetjiliUser(account) });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Cashout failed" });
+    }
+  });
+
+  app.post("/api/betjili365/bets/settle", (req, res) => {
+    try {
+      const resolved = resolveBetjiliAuth(req);
+      if (!resolved) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+      const { account, accounts } = resolved;
+      const ticketId = String(req.body?.ticketId || "");
+      const mode = String(req.body?.outcome || "auto").toLowerCase();
+      const bets = readJsonArraySafe<any>(BETJILI_BETS_FILE);
+      const ticket = bets.find((b) => b.id === ticketId && b.userId === account.id);
+      if (!ticket) return res.status(404).json({ success: false, error: "টিকিট পাওয়া যায়নি।" });
+      if (ticket.status !== "open") return res.status(400).json({ success: false, error: "টিকিটটি ইতিমধ্যে সেটল করা হয়েছে।" });
+
+      // Fair odds-weighted roll if outcome is 'auto', or explicit won/lost test
+      let isWon = false;
+      if (mode === "won") {
+        isWon = true;
+      } else if (mode === "lost") {
+        isWon = false;
+      } else {
+        const impliedWinProb = Math.max(0.1, Math.min(0.85, 0.94 / Number(ticket.combinedOdds || 2)));
+        const roll = crypto.randomInt(0, 10000) / 10000;
+        isWon = roll < impliedWinProb;
+      }
+
+      if (isWon) {
+        ticket.status = "won";
+        ticket.payout = Number(ticket.potentialPayout);
+        account.balanceBdt += ticket.payout;
+        account.totalWon += ticket.payout;
+        recordBetjiliTx(account.id, "win", ticket.payout, "Bet Settlement", `টিকিট ${ticket.id} জিতেছেন!`, account.balanceBdt);
+      } else {
+        ticket.status = "lost";
+        ticket.payout = 0;
+      }
+      ticket.settledAt = new Date().toISOString();
+
+      writeJsonArraySafe(BETJILI_BETS_FILE, bets);
+      writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+
+      return res.json({ success: true, ticket, user: sanitizeBetjiliUser(account) });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Settlement failed" });
+    }
+  });
+
+  app.post("/api/betjili365/games/play", (req, res) => {
+    try {
+      const resolved = resolveBetjiliAuth(req);
+      if (!resolved) return res.status(401).json({ success: false, error: "গেম খেলতে প্রথমে API অ্যাকাউন্টে লগইন করুন।" });
+
+      const { account, accounts } = resolved;
+      const game = String(req.body?.game || "").toLowerCase();
+      const stake = Number(req.body?.stake || 0);
+
+      if (!Number.isFinite(stake) || stake < 10 || stake > 25000) {
+        return res.status(400).json({ success: false, error: "গেম স্টেক ৳১০ থেকে ৳২৫,০০০ এর মধ্যে হতে হবে।" });
+      }
+      if (account.balanceBdt < stake) {
+        return res.status(400).json({ success: false, error: "পর্যাপ্ত ভার্চুয়াল ব্যালেন্স নেই।" });
+      }
+
+      account.balanceBdt -= stake;
+      account.totalWagered += stake;
+      account.vipPoints += Math.max(2, Math.floor(stake / 100));
+      account.vipLevel = computeVipTier(account.vipPoints);
+
+      let won = false;
+      let multiplier = 0;
+      let resultDetail = "";
+
+      if (game === "aviator_crash") {
+        const targetMult = Math.max(1.1, Math.min(20, Number(req.body?.targetMultiplier || 2)));
+        // Crash point distribution: ~3% instant 1.00x, else 0.96 / U
+        const r = crypto.randomInt(1, 10000) / 10000;
+        const crashPoint = r < 0.03 ? 1.0 : Number(Math.max(1.01, Math.min(50, 0.96 / r)).toFixed(2));
+        won = crashPoint >= targetMult;
+        multiplier = won ? targetMult : 0;
+        resultDetail = `প্লেন ক্র্যাশ করেছে ${crashPoint.toFixed(2)}x-এ (টার্গেট ${targetMult.toFixed(2)}x)`;
+      } else if (game === "dice_7up") {
+        const pick = String(req.body?.pick || "up").toLowerCase(); // 'down' | '7' | 'up'
+        const d1 = crypto.randomInt(1, 7);
+        const d2 = crypto.randomInt(1, 7);
+        const sum = d1 + d2;
+        if (pick === "down" && sum < 7) {
+          won = true;
+          multiplier = 1.95;
+        } else if (pick === "7" && sum === 7) {
+          won = true;
+          multiplier = 5.0;
+        } else if (pick === "up" && sum > 7) {
+          won = true;
+          multiplier = 1.95;
+        }
+        resultDetail = `ডাইস: ${d1} + ${d2} = ${sum}`;
+      } else if (game === "lucky_spin") {
+        const segments = [
+          { label: "0x (চেষ্টা করুন)", mult: 0 },
+          { label: "0.5x ক্যাশব্যাক", mult: 0.5 },
+          { label: "1.5x", mult: 1.5 },
+          { label: "2x ডাবল", mult: 2.0 },
+          { label: "0x", mult: 0 },
+          { label: "3x ট্রিপল", mult: 3.0 },
+          { label: "5x মেগা", mult: 5.0 },
+          { label: "0.5x", mult: 0.5 }
+        ];
+        const seg = segments[crypto.randomInt(0, segments.length)];
+        multiplier = seg.mult;
+        won = multiplier >= 1;
+        resultDetail = `হুইল থেমেছে: ${seg.label}`;
+      } else if (game === "coin_toss") {
+        const pick = String(req.body?.pick || "heads").toLowerCase();
+        const flip = crypto.randomInt(0, 2) === 0 ? "heads" : "tails";
+        won = pick === flip;
+        multiplier = won ? 1.95 : 0;
+        resultDetail = `কয়েন পড়েছে: ${flip === "heads" ? "হেড (Heads)" : "টেইল (Tails)"}`;
+      } else {
+        return res.status(400).json({ success: false, error: "অবৈধ গেম টাইপ।" });
+      }
+
+      const payout = Number((stake * multiplier).toFixed(2));
+      if (payout > 0) {
+        account.balanceBdt += payout;
+        account.totalWon += payout;
+      }
+
+      writeJsonArraySafe(BETJILI_ACCOUNTS_FILE, accounts);
+      recordBetjiliTx(
+        account.id,
+        payout > 0 ? "game_win" : "game_bet",
+        payout > 0 ? payout - stake : -stake,
+        game,
+        resultDetail,
+        account.balanceBdt
+      );
+
+      return res.json({
+        success: true,
+        game,
+        won,
+        stake,
+        multiplier,
+        payout,
+        resultDetail,
+        user: sanitizeBetjiliUser(account)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || "Game play failed" });
     }
   });
 

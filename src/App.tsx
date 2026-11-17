@@ -135,6 +135,7 @@ import { PagesDevSyncModal } from './components/PagesDevSyncModal';
 import { decodeSyncBundle } from './lib/syncExportImport';
 import { ExternalLinkPopupModal } from './components/ExternalLinkPopupModal';
 import { AdminAppModal } from './components/AdminAppModal';
+import { Betjili365Tab, BetjiliFeedEvent } from './components/Betjili365Tab';
 import { fetchLiveMatchDirectClient } from './lib/clientLiveMatchSync';
 import { CricketAppStateBackup, uploadBackupToGoogleDrive, getDailyBackupFileName, getTodayDateKey } from './lib/googleDrive';
 import { getCachedAccessToken, signInWithGoogle } from './lib/googleCalendar';
@@ -1520,7 +1521,8 @@ export default function App() {
     | 'ai-assistant'
     | 'over-scores'
     | 'crex'
-    | 'sofascore';
+    | 'sofascore'
+    | 'betjili365';
 
   const [isUnifiedMenuOpen, setIsUnifiedMenuOpen] = useState(false);
 
@@ -1558,7 +1560,8 @@ export default function App() {
       'ai-assistant': 'AI Assistant',
       'over-scores': 'ওভার স্কোর',
       'crex': 'Crex লাইভ স্কোর',
-      'sofascore': 'Sofascore লাইভ স্কোর'
+      'sofascore': 'Sofascore লাইভ স্কোর',
+      'betjili365': 'Betjili365 (BD/BN) API'
     };
     const titlesEn: Record<AppSubPageId, string> = {
       'scorer': 'Scorer',
@@ -1579,7 +1582,8 @@ export default function App() {
       'ai-assistant': 'AI Assistant',
       'over-scores': 'Over Scores',
       'crex': 'Crex Live Score',
-      'sofascore': 'Sofascore Live Score'
+      'sofascore': 'Sofascore Live Score',
+      'betjili365': 'Betjili365 (BD/BN) API'
     };
     return lang === 'bn' ? titlesBn[pageId] : titlesEn[pageId];
   }, [lang]);
@@ -10863,11 +10867,11 @@ export default function App() {
       {/* Mobile Frame Wrapper for Desktop */}
       <div className={cn(
         "flex flex-col w-full bg-white dark:bg-slate-900 relative overflow-hidden transition-all duration-300",
-        activeMainTab === 'betslip'
+        (activeMainTab === 'betslip' || activeSubPage === 'betjili365')
           ? "md:max-w-6xl md:min-h-[850px] md:my-4 md:rounded-3xl md:border-4 md:border-slate-800 md:shadow-2xl"
           : "md:max-w-[450px] md:h-[900px] md:max-h-[90vh] md:rounded-[3rem] md:border-[10px] md:border-slate-800 md:shadow-[0_0_0_2px_rgba(255,255,255,0.1),0_40px_100px_-20px_rgba(0,0,0,0.5)]"
       )}>
-        {matches.length === 0 ? (
+        {(matches.length === 0 && activeSubPage !== 'betjili365' && activeSubPage !== 'crex' && activeSubPage !== 'sofascore') ? (
           /* ========================================================
              EMPTY STATE: Switch between New Blank Match & News Feed
              ======================================================== */
@@ -10909,6 +10913,16 @@ export default function App() {
                 >
                   <span>⚽</span>
                   <span>Sofascore</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigateToSubPage('betjili365')}
+                  className="py-1.5 px-2.5 rounded-xl text-xs font-black bg-teal-500/20 hover:bg-teal-500/30 text-amber-300 border border-emerald-500/40 flex items-center gap-1 cursor-pointer"
+                  title="https://betjili365.com/bd/bn API ট্যাব"
+                >
+                  <span>🎰</span>
+                  <span>Betjili365</span>
                 </button>
 
                 <button
@@ -11436,6 +11450,16 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => navigateToSubPage('betjili365')}
+              className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-gradient-to-r from-emerald-500/20 to-amber-500/20 hover:from-emerald-500/30 hover:to-amber-500/30 text-amber-300 border border-emerald-500/40 flex items-center gap-1 shrink-0 cursor-pointer transition-all"
+              title="Betjili365 (https://betjili365.com/bd/bn) API ও লাইভ অডস"
+            >
+              <span>🎰</span>
+              <span>betjili365</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsAdminAppOpen(true)}
               className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1 shrink-0 cursor-pointer transition-all"
               title="Admin App (ম্যানেজ ডিফল্ট ম্যাচ ও সিরিজ)"
@@ -11683,6 +11707,14 @@ export default function App() {
               >
                 <span>⚽</span>
                 <span className="truncate">sofascore</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { navigateToSubPage('betjili365'); setIsUnifiedMenuOpen(false); }}
+                className="p-2 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/80 border border-amber-500/50 text-amber-300 text-[11px] font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <span>🎰</span>
+                <span className="truncate">betjili365</span>
               </button>
               <button
                 type="button"
@@ -12517,6 +12549,81 @@ export default function App() {
                 setMatches(prev => prev.map(m => m.id === match.id ? { ...m, target: newTarget } : m));
               }}
               lang={lang}
+            />
+          ) : activeSubPage === 'betjili365' ? (
+            <Betjili365Tab
+              lang={lang}
+              onSyncMatchToScorer={(ev: BetjiliFeedEvent) => {
+                if (ev.sport === 'football') {
+                  addNewFootballMatch(ev.team1Full || ev.team1, ev.team2Full || ev.team2, ev.liveSyncUrl);
+                } else {
+                  addNewMatch('20', 20, {
+                    team1: ev.team1,
+                    team2: ev.team2,
+                    name: `${ev.team1} vs ${ev.team2}`,
+                    liveMatchUrl: ev.liveSyncUrl,
+                    liveSyncEnabled: true
+                  });
+                }
+                goHome();
+              }}
+              onAddSelectionToBetSlip={(ev: BetjiliFeedEvent, selectionLabel: string, odds: number, betRuleType: string, targetValue?: number) => {
+                const newEvent: BetEvent = {
+                  id: `bj-ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  dateTime: new Date().toLocaleDateString('en-GB').replace(/\//g, '.') + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                  eventNumber: `#${Math.floor(100000 + Math.random() * 900000)}`,
+                  sport: ev.sport === 'football' ? 'Football' : 'Cricket',
+                  league: ev.league || 'Betjili365 BD/BN',
+                  match: `${ev.team1Full || ev.team1} - ${ev.team2Full || ev.team2}`,
+                  team1: ev.team1Full || ev.team1,
+                  team2: ev.team2Full || ev.team2,
+                  selection: selectionLabel,
+                  odds: odds.toFixed(2),
+                  status: ev.status === 'live' ? 'Live' : 'Pending',
+                  liveMatchUrl: ev.liveSyncUrl,
+                  autoSyncScore: true,
+                  autoSettleResult: true,
+                  betRuleType: (betRuleType as BetRuleType) || 'auto',
+                  ...(targetValue !== undefined ? { betTargetValue: targetValue } : {})
+                };
+
+                setSavedSlipCards((prevCards) => {
+                  const targetId = activeSlipCardId || prevCards[0]?.id;
+                  return prevCards.map((card) => {
+                    if (card.id !== targetId) return card;
+                    const updatedSlip = recalculateBetSlipSummary({
+                      ...card.slipData,
+                      events: [...card.slipData.events, newEvent]
+                    });
+                    return {
+                      ...card,
+                      countBadge: updatedSlip.events.filter((e) => !e.hidden).length,
+                      slipData: updatedSlip
+                    };
+                  });
+                });
+
+                toast.success(
+                  lang === 'bn'
+                    ? `${ev.team1} vs ${ev.team2} (${selectionLabel} @ ${odds.toFixed(2)}) বেট স্লিপে যুক্ত হয়েছে!`
+                    : `Added ${selectionLabel} @ ${odds.toFixed(2)} to Bet Slip!`
+                );
+                setActiveMainTab('betslip');
+              }}
+              onSyncCustomUrl={({ url, team1, team2, sport }) => {
+                if (sport === 'football') {
+                  addNewFootballMatch(team1, team2, url);
+                } else {
+                  addNewMatch('20', 20, {
+                    team1,
+                    team2,
+                    name: `${team1} vs ${team2}`,
+                    liveMatchUrl: url,
+                    liveSyncEnabled: true
+                  });
+                }
+                goHome();
+              }}
             />
           ) : (activeSubPage === 'crex' || activeSubPage === 'sofascore') ? (
             <div className="p-3 sm:p-6 max-w-4xl mx-auto w-full space-y-5">

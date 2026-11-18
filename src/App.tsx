@@ -95,7 +95,9 @@ import {
   Tag,
   Bot,
   Menu,
-  Shield
+  Shield,
+  BarChart3,
+  User
 } from 'lucide-react';
 import { INITIAL_SPORTS_NEWS, SportsNewsArticle } from '../data/sportsNewsData';
 import { toast } from 'sonner';
@@ -136,6 +138,9 @@ import { decodeSyncBundle } from './lib/syncExportImport';
 import { ExternalLinkPopupModal } from './components/ExternalLinkPopupModal';
 import { AdminAppModal } from './components/AdminAppModal';
 import { Betjili365Tab, BetjiliFeedEvent } from './components/Betjili365Tab';
+import { PerformanceSummaryChart } from './components/PerformanceSummaryChart';
+import { WinProbabilityBar } from './components/WinProbabilityBar';
+import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { fetchLiveMatchDirectClient } from './lib/clientLiveMatchSync';
 import { CricketAppStateBackup, uploadBackupToGoogleDrive, getDailyBackupFileName, getTodayDateKey } from './lib/googleDrive';
 import { getCachedAccessToken, signInWithGoogle } from './lib/googleCalendar';
@@ -540,7 +545,7 @@ const TRANSLATIONS = {
   }
 };
 
-const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, onEditPlayer, onEditTeamScore }: { 
+const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, onEditPlayer, onEditTeamScore, onOpenPlayerProfile }: { 
   match: MatchState; 
   t: any; 
   lang: string;
@@ -549,6 +554,7 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
   onSelectBatter: (slot: 1 | 2, idx: number) => void;
   onEditPlayer: (idx: number) => void;
   onEditTeamScore: () => void;
+  onOpenPlayerProfile?: (playerName: string, teamName?: string, editIdx?: number) => void;
 }) => {
   const resolvedInfo = resolveCricketMatchTeamsAndScores(match, Boolean(match.isUpcoming));
   const cleanT1 = resolvedInfo.cleanT1;
@@ -556,6 +562,7 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
   const isT2BattingNow = resolvedInfo.isT2Batting;
 
   const [selectedTeamTab, setSelectedTeamTab] = useState<'team1' | 'team2'>(isT2BattingNow ? 'team2' : 'team1');
+  const [showPerformanceSummary, setShowPerformanceSummary] = useState(false);
 
   useEffect(() => {
     setSelectedTeamTab(isT2BattingNow ? 'team2' : 'team1');
@@ -649,14 +656,33 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
           className="px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-indigo-500" />
               <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-500">
                 {t.scorecard} ({cleanT1} vs {cleanT2})
               </CardTitle>
             </div>
-            {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowPerformanceSummary(prev => !prev);
+                  if (!isExpanded) setIsExpanded(true);
+                }}
+                className={cn(
+                  "px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1.5 border cursor-pointer transition-all",
+                  showPerformanceSummary
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                    : "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 border-indigo-200 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+                )}
+              >
+                <BarChart3 size={12} />
+                <span>{lang === 'bn' ? 'পারফরম্যান্স সামারি' : 'Performance Summary'}</span>
+              </button>
+              {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+            </div>
           </div>
         </CardHeader>
         <AnimatePresence>
@@ -668,6 +694,16 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
               className="overflow-hidden"
             >
               <CardContent className="p-0 border-t border-slate-100 dark:border-slate-800">
+                {showPerformanceSummary && (
+                  <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-950/90">
+                    <PerformanceSummaryChart
+                      match={match}
+                      lang={lang}
+                      onSelectPlayer={(name, team) => onOpenPlayerProfile?.(name, team)}
+                      onClose={() => setShowPerformanceSummary(false)}
+                    />
+                  </div>
+                )}
                 {/* Team 1 vs Team 2 Innings Selector Tabs */}
                 <div className="grid grid-cols-2 gap-1.5 p-2.5 bg-slate-100/70 dark:bg-slate-800/60 border-b border-slate-200/70 dark:border-slate-800">
                   <button
@@ -736,11 +772,14 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
                           <tr 
                             key={`${selectedTeamTab}-${idx}-${p.name}`} 
                             onClick={() => {
-                              if (isViewingActiveBattingTeam) onEditPlayer(idx);
+                              if (isViewingActiveBattingTeam) {
+                                onEditPlayer(idx);
+                              } else {
+                                onOpenPlayerProfile?.(p.name, selectedTeamTab === 'team1' ? cleanT1 : cleanT2);
+                              }
                             }}
                             className={cn(
-                              "text-sm transition-colors",
-                              isViewingActiveBattingTeam ? "cursor-pointer" : "cursor-default",
+                              "text-sm transition-colors cursor-pointer",
                               (isB1 || isB2) ? "bg-indigo-50/30 dark:bg-indigo-900/10 font-bold" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"
                             )}
                           >
@@ -748,6 +787,23 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
                               <div className="flex flex-col">
                                 <div className="flex items-center gap-2">
                                   <span>{p.name}</span>
+                                  {onOpenPlayerProfile && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onOpenPlayerProfile(
+                                          p.name,
+                                          selectedTeamTab === 'team1' ? cleanT1 : cleanT2,
+                                          isViewingActiveBattingTeam ? idx : undefined
+                                        );
+                                      }}
+                                      className="p-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/35 text-indigo-500 dark:text-indigo-300 border border-indigo-400/30 cursor-pointer shrink-0 transition-colors"
+                                      title={lang === 'bn' ? 'প্লেয়ার প্রোফাইল দেখুন' : 'View Player Profile'}
+                                    >
+                                      <User size={10} />
+                                    </button>
+                                  )}
                                   {isB1 && <Badge className="bg-indigo-100 text-indigo-600 dark:bg-indigo-900 font-bold text-[8px] h-4">B1*</Badge>}
                                   {isB2 && <Badge className="bg-emerald-100 text-emerald-600 dark:bg-emerald-900 font-bold text-[8px] h-4">B2</Badge>}
                                 </div>
@@ -812,8 +868,20 @@ const Scorecard = ({ match, t, lang, onStrikeIdx, onSwapStrike, onSelectBatter, 
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {displayedBowlingStats.map((bw, bIdx) => (
-                            <tr key={`${selectedTeamTab}-bw-${bIdx}-${bw.name}`} className="text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                              <td className="px-4 py-2.5 font-black text-slate-700 dark:text-slate-200">{bw.name}</td>
+                            <tr
+                              key={`${selectedTeamTab}-bw-${bIdx}-${bw.name}`}
+                              onClick={() => onOpenPlayerProfile?.(bw.name, bowlingTeamLabelForTab)}
+                              className={cn(
+                                "text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors",
+                                onOpenPlayerProfile && "cursor-pointer"
+                              )}
+                            >
+                              <td className="px-4 py-2.5 font-black text-slate-700 dark:text-slate-200">
+                                <div className="flex items-center gap-1.5">
+                                  <span>{bw.name}</span>
+                                  {onOpenPlayerProfile && <User size={11} className="text-cyan-500 shrink-0" />}
+                                </div>
+                              </td>
                               <td className="px-2 py-2.5 text-center font-mono font-bold text-slate-500 dark:text-slate-400">{bw.overs || '0.0'}</td>
                               <td className="px-2 py-2.5 text-center font-mono font-bold text-slate-500 dark:text-slate-400">{bw.maidens ?? 0}</td>
                               <td className="px-2 py-2.5 text-center font-mono font-black">{bw.runs ?? 0}</td>
@@ -5260,6 +5328,7 @@ export default function App() {
 
   // Admin App Modal State
   const [isAdminAppOpen, setIsAdminAppOpen] = useState(false);
+  const [playerProfileTarget, setPlayerProfileTarget] = useState<{ name: string; team?: string; editIdx?: number } | null>(null);
 
   // Admin Defaults Sync from Server (Loads default matches & series, preventing empty screen upon refresh)
   const loadAdminDefaultsFromServer = useCallback(async () => {
@@ -14121,6 +14190,7 @@ export default function App() {
                                 )
                               }
                               onDeleteMatch={() => deleteMatch(match.id)}
+                              onOpenPlayerProfile={(name, team) => setPlayerProfileTarget({ name, team })}
                               resolvedBattingInfo={resolveCricketMatchTeamsAndScores(match, isUpcomingMatch)}
                             />
                           </div>
@@ -15457,6 +15527,7 @@ export default function App() {
                 onSelectBatter={onSelectBatter}
                 onEditPlayer={onEditPlayer}
                 onEditTeamScore={onEditTeamScore}
+                onOpenPlayerProfile={(name, team, editIdx) => setPlayerProfileTarget({ name, team, editIdx })}
               />
             )}
           </div>
@@ -17614,6 +17685,12 @@ export default function App() {
                 </CardContent>
               </Card>
             )}
+          </div>
+        )}
+
+        {displayConfigs.showRecentBalls && !isFocusMode && (
+          <div className="mb-1">
+            <WinProbabilityBar match={match} lang={lang} />
           </div>
         )}
 
@@ -22850,6 +22927,22 @@ export default function App() {
           }
         }}
         onRefreshDefaultsFromServer={loadAdminDefaultsFromServer}
+      />
+
+      {/* Player Profile Modal (Match + Career Overview & Chart) */}
+      <PlayerProfileModal
+        isOpen={Boolean(playerProfileTarget)}
+        onClose={() => setPlayerProfileTarget(null)}
+        playerName={playerProfileTarget?.name || ''}
+        teamName={playerProfileTarget?.team}
+        currentMatch={match}
+        allMatches={matches}
+        lang={lang}
+        onEditCurrentBatter={
+          typeof playerProfileTarget?.editIdx === 'number'
+            ? () => onEditPlayer(playerProfileTarget.editIdx!)
+            : undefined
+        }
       />
     </div>
   );

@@ -21,11 +21,15 @@ import {
   Award,
   Flame,
   ArrowLeftRight,
-  Trash2
+  Trash2,
+  BarChart3,
+  User
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MatchState, PlayerStats, BowlerStats, getShortTeamName } from '../types';
 import { formatMatchDateTimeDisplay, MatchCountdownBadge, toBengaliDigits } from './MatchCountdown';
+import { PerformanceSummaryChart } from './PerformanceSummaryChart';
+import { WinProbabilityBar } from './WinProbabilityBar';
 import { cn } from '@/lib/utils';
 
 interface CricketMatchArenaProps {
@@ -59,6 +63,7 @@ interface CricketMatchArenaProps {
   isInUpcomingSection?: boolean;
   onToggleSection?: () => void;
   onDeleteMatch?: () => void;
+  onOpenPlayerProfile?: (playerName: string, teamName?: string) => void;
   resolvedBattingInfo: {
     cleanT1: string;
     cleanT2: string;
@@ -101,6 +106,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
   isInUpcomingSection,
   onToggleSection,
   onDeleteMatch,
+  onOpenPlayerProfile,
   resolvedBattingInfo
 }) => {
   const dateTimeInfo = formatMatchDateTimeDisplay(match.matchStartTime, match.matchStartTimeIso, lang, match.matchDate);
@@ -120,6 +126,7 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
   const [expandedTeamDropdown, setExpandedTeamDropdown] = useState<'team1' | 'team2' | 'both' | null>(null);
   // Which individual player row is expanded for detailed view inside the scorecard dropdown
   const [expandedPlayerKey, setExpandedPlayerKey] = useState<string | null>(null);
+  const [showPerformanceSummary, setShowPerformanceSummary] = useState(false);
 
   // Inline editors state
   const [isEditingOversInline, setIsEditingOversInline] = useState(false);
@@ -705,6 +712,19 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                           <div className="flex items-center gap-1.5">
                             <span className="text-[9px] font-mono text-slate-500 w-3.5 shrink-0">{idx + 1}.</span>
                             <span className="truncate">{p.name}</span>
+                            {onOpenPlayerProfile && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenPlayerProfile(p.name, teamName);
+                                }}
+                                className="p-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/35 text-indigo-300 border border-indigo-400/30 cursor-pointer shrink-0 transition-colors"
+                                title={lang === 'bn' ? 'প্লেয়ার প্রোফাইল দেখুন' : 'View Player Profile'}
+                              >
+                                <User size={10} />
+                              </button>
+                            )}
                             {isOnStrike && (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/25 border border-emerald-400/50 text-emerald-300 text-[9px] font-black shrink-0">
                                 *
@@ -830,6 +850,19 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                                   </div>
 
                                   <div className="flex items-center gap-1.5">
+                                    {onOpenPlayerProfile && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onOpenPlayerProfile(p.name, teamName);
+                                        }}
+                                        className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-200 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <User size={10} />
+                                        <span>{lang === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
+                                      </button>
+                                    )}
                                     {isCurrentlyBatting && (
                                       <button
                                         type="button"
@@ -935,7 +968,8 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                       return (
                         <tr
                           key={`team-${teamNum}-bw-${bIdx}-${bw.name}`}
-                          className={`transition-colors ${
+                          onClick={() => onOpenPlayerProfile?.(bw.name, bowlingTeamLabel)}
+                          className={`transition-colors ${onOpenPlayerProfile ? 'cursor-pointer' : ''} ${
                             isActiveBowler
                               ? 'bg-cyan-500/10 font-bold text-white'
                               : 'hover:bg-white/5 text-slate-200'
@@ -945,6 +979,9 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
                             <div className="flex items-center gap-1.5">
                               <span className="text-[9px] font-mono text-slate-500 w-3.5 shrink-0">{bIdx + 1}.</span>
                               <span className="truncate">{bw.name}</span>
+                              {onOpenPlayerProfile && (
+                                <User size={10} className="text-cyan-400/80 shrink-0" />
+                              )}
                               {isActiveBowler && (
                                 <span className="px-1.5 py-0.2 rounded bg-cyan-500/25 border border-cyan-400/50 text-cyan-300 text-[8px] font-black uppercase shrink-0">
                                   BOWL
@@ -2183,6 +2220,11 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
             </button>
           </div>
 
+          {/* Win Probability Bar & Match Ebb & Flow directly above ball-by-ball history */}
+          {!isUpcomingMatch && (
+            <WinProbabilityBar match={match} lang={lang} />
+          )}
+
           {/* ====================================================================
               RECENT OVERS BAR (এক্স্যাক্ট ডিজাইন: 13th [ 1 ] [ 1 ] [ 0 ] [ 0 ] [ 0 ] | 12th [ 6 ] [ 0 ] [ 0 ])
               ==================================================================== */}
@@ -2206,20 +2248,35 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
             </div>
           )}
 
-          {/* Toggle Both Scorecards Button */}
-          <div className="flex items-center justify-between px-1">
-            <button
-              type="button"
-              onClick={() => setExpandedTeamDropdown(expandedTeamDropdown === 'both' ? null : 'both')}
-              className="text-[11px] font-bold text-slate-300 hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <Award size={12} className="text-emerald-400" />
-              <span>
-                {expandedTeamDropdown === 'both'
-                  ? (lang === 'bn' ? 'উভয় দলের স্কোরকার্ড কলাপ্স করুন ▲' : 'Collapse Both Team Scorecards ▲')
-                  : (lang === 'bn' ? 'উভয় দলের পূর্ণাঙ্গ স্কোরকার্ড একসাথে দেখুন ▾' : 'Expand Both Team Scorecards Together ▾')}
-              </span>
-            </button>
+          {/* Toggle Both Scorecards & Performance Summary Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setExpandedTeamDropdown(expandedTeamDropdown === 'both' ? null : 'both')}
+                className="text-[11px] font-bold text-slate-300 hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Award size={12} className="text-emerald-400" />
+                <span>
+                  {expandedTeamDropdown === 'both'
+                    ? (lang === 'bn' ? 'উভয় দলের স্কোরকার্ড কলাপ্স করুন ▲' : 'Collapse Both Team Scorecards ▲')
+                    : (lang === 'bn' ? 'উভয় দলের পূর্ণাঙ্গ স্কোরকার্ড একসাথে দেখুন ▾' : 'Expand Both Team Scorecards Together ▾')}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPerformanceSummary(prev => !prev)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1.5 border cursor-pointer transition-all ${
+                  showPerformanceSummary
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/25'
+                    : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-400/40'
+                }`}
+              >
+                <BarChart3 size={12} />
+                <span>{lang === 'bn' ? 'পারফরম্যান্স সামারি' : 'Performance Summary'}</span>
+              </button>
+            </div>
 
             {/* Fallback compact display if recentTwoOvers is empty but liveRecentBalls exists */}
             {recentTwoOvers.length === 0 && match.liveRecentBalls && match.liveRecentBalls.length > 0 && (
@@ -2233,6 +2290,15 @@ export const CricketMatchArena: React.FC<CricketMatchArenaProps> = ({
               </div>
             )}
           </div>
+
+          {showPerformanceSummary && (
+            <PerformanceSummaryChart
+              match={match}
+              lang={lang}
+              onSelectPlayer={(name, team) => onOpenPlayerProfile?.(name, team)}
+              onClose={() => setShowPerformanceSummary(false)}
+            />
+          )}
 
           {/* Expanded Dropdown Content Area */}
           <AnimatePresence>
